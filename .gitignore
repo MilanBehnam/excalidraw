@@ -27,3 +27,6 @@ dev-dist
 html
 meta*.json
 .claude
+deploy/.env
+# the backend uses npm (Dockerfile runs npm ci)
+!backend/package-lock.json

@@ -1,0 +1,6 @@
+# HTTPS is required: collab encryption uses Web Crypto (secure contexts only).
+{$DOMAIN} {
+	reverse_proxy /socket.io/* backend:3002
+	reverse_proxy /api/* backend:3002
+	reverse_proxy app:80
+}

@@ -21,6 +21,7 @@ import { ShareableLinkDialog } from "@excalidraw/excalidraw/components/Shareable
 import Trans from "@excalidraw/excalidraw/components/Trans";
 import {
   APP_NAME,
+  DEFAULT_SIDEBAR,
   EVENT,
   VERSION_TIMEOUT,
   debounce,
@@ -148,6 +149,11 @@ import "./index.scss";
 
 import { ExcalidrawPlusPromoBanner } from "./components/ExcalidrawPlusPromoBanner";
 import { AppSidebar } from "./components/AppSidebar";
+import {
+  COLLECTIONS_SIDEBAR_TAB,
+  ensureUsername,
+  importCollectionFromLink,
+} from "./collections/collections";
 
 import type { CollabAPI } from "./collab/Collab";
 
@@ -484,7 +490,7 @@ const ExcalidrawWrapper = () => {
       if (collabAPI?.isCollaborating()) {
         if (data.scene.elements) {
           collabAPI
-            .fetchImageFilesFromFirebase({
+            .fetchImageFiles({
               elements: data.scene.elements,
               forceFetchFiles: true,
             })
@@ -562,20 +568,58 @@ const ExcalidrawWrapper = () => {
       return;
     }
 
+    // #collection=<id>,<key> links add the collection to "My collections"
+    const openCollectionFromLink = () => {
+      if (isCollabDisabled || !importCollectionFromLink()) {
+        return false;
+      }
+      window.history.replaceState(
+        {},
+        APP_NAME,
+        collabAPI?.getActiveRoomLink() || window.location.origin,
+      );
+      ensureUsername(collabAPI);
+      excalidrawAPI.toggleSidebar({
+        name: DEFAULT_SIDEBAR.name,
+        tab: COLLECTIONS_SIDEBAR_TAB,
+        force: true,
+      });
+      return true;
+    };
+
+    const isCollectionLink = openCollectionFromLink();
     initializeScene({ collabAPI, excalidrawAPI }).then(async (data) => {
       loadImages(data, /* isInitialLoad */ true);
       initialStatePromiseRef.current.promise.resolve(data.scene);
+      if (isCollectionLink) {
+        // initial scene may have restored a different sidebar state
+        excalidrawAPI.toggleSidebar({
+          name: DEFAULT_SIDEBAR.name,
+          tab: COLLECTIONS_SIDEBAR_TAB,
+          force: true,
+        });
+      }
     });
 
     const onHashChange = async (event: HashChangeEvent) => {
       event.preventDefault();
+      if (openCollectionFromLink()) {
+        return;
+      }
       const libraryUrlTokens = parseLibraryTokensFromUrl();
       if (!libraryUrlTokens) {
+        // leaving the room, or switching to another one (e.g. another file
+        // in a collection)
         if (
           collabAPI?.isCollaborating() &&
-          !isCollaborationLink(window.location.href)
+          collabAPI.getActiveRoomLink() !== window.location.href
         ) {
           collabAPI.stopCollaboration(false);
+          if (isCollaborationLink(window.location.href)) {
+            // stopping resumes local saving; keep the room we're leaving from
+            // overwriting the user's own drawing until the next room pauses it
+            LocalData.pauseSave("collaboration");
+          }
         }
         excalidrawAPI.updateScene({ appState: { isLoading: true } });
 

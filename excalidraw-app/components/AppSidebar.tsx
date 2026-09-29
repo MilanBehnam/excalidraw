@@ -2,9 +2,13 @@ import { DefaultSidebar, Sidebar, THEME } from "@excalidraw/excalidraw";
 import {
   messageCircleIcon,
   presentationIcon,
+  usersIcon,
 } from "@excalidraw/excalidraw/components/icons";
 import { LinkButton } from "@excalidraw/excalidraw/components/LinkButton";
 import { useUIAppState } from "@excalidraw/excalidraw/context/ui-appState";
+
+import { CollectionsTab } from "../collections/CollectionsTab";
+import { COLLECTIONS_SIDEBAR_TAB } from "../collections/collections";
 
 import "./AppSidebar.scss";
 
@@ -72,6 +76,15 @@ export const AppSidebar = () => {
     <DefaultSidebar>
       <DefaultSidebar.TabTriggers>
         <Sidebar.TabTrigger
+          tab={COLLECTIONS_SIDEBAR_TAB}
+          title="My collections"
+          style={{
+            opacity: openSidebar?.tab === COLLECTIONS_SIDEBAR_TAB ? 1 : 0.4,
+          }}
+        >
+          {usersIcon}
+        </Sidebar.TabTrigger>
+        <Sidebar.TabTrigger
           tab="comments"
           style={{ opacity: openSidebar?.tab === "comments" ? 1 : 0.4 }}
         >
@@ -84,6 +97,9 @@ export const AppSidebar = () => {
           {presentationIcon}
         </Sidebar.TabTrigger>
       </DefaultSidebar.TabTriggers>
+      <Sidebar.Tab tab={COLLECTIONS_SIDEBAR_TAB}>
+        <CollectionsTab />
+      </Sidebar.Tab>
       <Sidebar.Tab tab="comments">
         <div className="app-sidebar-promo-container">
           <div

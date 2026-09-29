@@ -31,7 +31,6 @@ export enum WS_SUBTYPES {
 
 export const FIREBASE_STORAGE_PREFIXES = {
   shareLinkFiles: `/files/shareLinks`,
-  collabFiles: `/files/rooms`,
 };
 
 export const ROOM_ID_BYTES = 10;
@@ -42,6 +41,8 @@ export const STORAGE_KEYS = {
   LOCAL_STORAGE_COLLAB: "excalidraw-collab",
   LOCAL_STORAGE_THEME: "excalidraw-theme",
   LOCAL_STORAGE_DEBUG: "excalidraw-debug",
+  LOCAL_STORAGE_COLLECTIONS: "excalidraw-collections",
+  LOCAL_STORAGE_BACKEND_PASSCODE: "excalidraw-backend-passcode",
   VERSION_DATA_STATE: "version-dataState",
   VERSION_FILES: "version-files",
 

@@ -1,0 +1,39 @@
+# Local dev: backend + DynamoDB Local + S3Mock (S3). The app runs via `yarn start`.
+#   docker compose -f backend/docker-compose.yml up --build
+services:
+  backend:
+    build: .
+    ports:
+      - "3002:3002"
+    environment:
+      CREATE_RESOURCES: "true"
+      CORS_ORIGIN: http://localhost:3001
+      PASSCODE: dev
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: localsecret
+      AWS_ENDPOINT_URL_DYNAMODB: http://dynamodb:8000
+      AWS_ENDPOINT_URL_S3: http://s3:9090
+    depends_on:
+      - dynamodb
+      - s3
+
+  dynamodb:
+    image: amazon/dynamodb-local
+    command: -jar DynamoDBLocal.jar -sharedDb -dbPath /home/dynamodblocal/data
+    user: root
+    volumes:
+      - dynamodb:/home/dynamodblocal/data
+
+  s3:
+    image: adobe/s3mock
+    user: root
+    environment:
+      COM_ADOBE_TESTING_S3MOCK_STORE_ROOT: /data
+      COM_ADOBE_TESTING_S3MOCK_STORE_RETAIN_FILES_ON_EXIT: "true"
+    volumes:
+      - s3:/data
+
+volumes:
+  dynamodb:
+  s3:
