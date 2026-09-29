@@ -2,13 +2,13 @@
 # DynamoDB table + S3 bucket (encrypted drawings), and an EC2 instance that
 # clones this repo and runs deploy/docker-compose.yml (app, backend, Caddy).
 #
-#   aws cloudformation deploy --template-file deploy/aws.yml \
-#     --stack-name excalidraw --capabilities CAPABILITY_IAM \
-#     --parameter-overrides Passcode=<pick one>
+# Deployed with the CloudFormation service role from bootstrap.yml, whose
+# permissions are scoped to these fixed names and the Project=excalidraw tag:
 #
-# Every resource is tagged Project=excalidraw and named after the stack, so
-# the deployer's permissions can be scoped to them (deployer-policy.json).
-# The stack must be called "excalidraw" for that policy.
+#   aws cloudformation deploy --template-file deploy/aws.yml \
+#     --stack-name excalidraw --capabilities CAPABILITY_NAMED_IAM \
+#     --role-arn arn:aws:iam::<account id>:role/excalidraw-cloudformation \
+#     --parameter-overrides Passcode=<pick one>
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Excalidraw with live collaboration and shared collections
 
@@ -42,7 +42,9 @@ Resources:
   Table:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
+      TableName: excalidraw
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - { AttributeName: pk, AttributeType: S }
@@ -58,7 +60,9 @@ Resources:
   Bucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
+      BucketName: !Sub excalidraw-${AWS::AccountId}
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -70,6 +74,7 @@ Resources:
   Role:
     Type: AWS::IAM::Role
     Properties:
+      RoleName: excalidraw-backend
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -77,7 +82,7 @@ Resources:
             Principal: { Service: ec2.amazonaws.com }
             Action: sts:AssumeRole
       ManagedPolicyArns:
-        # lets you run commands on the instance without SSH (see README)
+        # shell access from the console (Session Manager), no SSH needed
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
       Policies:
         - PolicyName: excalidraw-backend
@@ -104,6 +109,7 @@ Resources:
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
+      InstanceProfileName: excalidraw-backend
       Roles: [!Ref Role]
 
   SecurityGroup:
@@ -184,13 +190,16 @@ Resources:
             EOF
             chmod 600 deploy/.env
             docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
+
+            # pushes to ${Branch} get deployed automatically
+            echo '*/5 * * * * root flock -n /run/excalidraw-update.lock /opt/excalidraw/deploy/update.sh >> /var/log/excalidraw-update.log 2>&1' > /etc/cron.d/excalidraw-update
           - SiteDomain: !If [HasDomain, !Ref Domain, !Sub "${IP}.sslip.io"]
 
   # all Project=excalidraw resources in one place (Resource Groups console)
   ResourceGroup:
     Type: AWS::ResourceGroups::Group
     Properties:
-      Name: !Ref AWS::StackName
+      Name: excalidraw
       ResourceQuery:
         Type: TAG_FILTERS_1_0
         Query:

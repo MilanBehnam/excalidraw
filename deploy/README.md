@@ -9,39 +9,37 @@ One CloudFormation stack ([aws.yml](aws.yml)) creates everything:
   - **Caddy**: automatic HTTPS.
 - An IAM role, so the server needs no stored AWS keys.
 
-## Deployer permissions
+## 1. One-time setup (admin)
 
-[deployer-policy.json](deployer-policy.json) is a least-privilege IAM policy for the user that runs the deploy. It's scoped like this:
+[bootstrap.yml](bootstrap.yml) creates two things:
 
-- **Tags:** EC2 resources can only be created with the tag `Project=excalidraw`, and only resources with that tag can be changed or deleted. Tags can't be added to other existing resources.
-- **Names:** IAM, DynamoDB, S3 and the stack itself are limited to names starting with `excalidraw` (CloudFormation names resources after the stack).
-- **iam:PassRole:** only this stack's role, and only to EC2.
-- **Wildcards:** only for read-only calls that AWS can't scope to a resource (`Describe*`, `tag:GetResources`, `ssm:GetCommandInvocation`).
+- **`excalidraw-cloudformation`**: the role CloudFormation uses to create the resources. It can only touch this project's resources: fixed names (`excalidraw-backend` role, `excalidraw` table, `excalidraw-<account id>` bucket, `excalidraw` resource group) and EC2 resources tagged `Project=excalidraw`. Only Canonical's Ubuntu images are allowed, and `iam:PassRole` passes the backend role to EC2 only.
+- **`excalidraw-deployer`**: the policy for your deploy user. It can run only the `excalidraw` stack, only through that role, and has no wildcard resources. The one `*` is the stack id AWS appends to stack ARNs (`stack/excalidraw/<generated id>`).
 
-Fill in your account ID and attach it to the deploy user:
+Run this as an admin. The easiest place is **AWS CloudShell** (the terminal icon in the console), which is already signed in:
 
 ```bash
-ACCOUNT_ID=123456789012   # your account
-sed "s/<ACCOUNT_ID>/$ACCOUNT_ID/g" deploy/deployer-policy.json > /tmp/excalidraw-deployer.json
-aws iam create-policy --policy-name excalidraw-deployer \
-  --policy-document file:///tmp/excalidraw-deployer.json
-aws iam attach-user-policy --user-name <your IAM user> \
-  --policy-arn arn:aws:iam::$ACCOUNT_ID:policy/excalidraw-deployer
+git clone https://github.com/MilanBehnam/excalidraw && cd excalidraw
+aws cloudformation deploy --template-file deploy/bootstrap.yml \
+  --stack-name excalidraw-bootstrap --capabilities CAPABILITY_NAMED_IAM \
+  --parameter-overrides DeployUser=<your IAM user>
 ```
 
-The stack must be named `excalidraw` in `us-east-1`; the policy is scoped to that. Every project resource then appears together under the **Resource Groups** console → group `excalidraw`.
-
-## Deploy
+## 2. Deploy (deploy user)
 
 ```bash
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 aws cloudformation deploy --template-file deploy/aws.yml \
-  --stack-name excalidraw --capabilities CAPABILITY_IAM \
+  --stack-name excalidraw --capabilities CAPABILITY_NAMED_IAM \
+  --role-arn arn:aws:iam::$ACCOUNT_ID:role/excalidraw-cloudformation \
   --parameter-overrides Passcode=<at least 8 characters>
 aws cloudformation describe-stacks --stack-name excalidraw \
   --query "Stacks[0].Outputs" --output table
 ```
 
 Open the `Url` output (`https://<ip>.sslip.io`). The first build takes **~10–15 minutes** on a t3.small. Until then the page doesn't load.
+
+Everything the stack creates appears together under **Resource Groups** → group `excalidraw`.
 
 Optional parameters:
 
@@ -51,15 +49,9 @@ Optional parameters:
 
 The passcode is needed to create collections. Friends who get a share link don't need it.
 
-## Update to the latest code
+## Updates
 
-Push to the deployed branch, then:
-
-```bash
-aws ssm send-command --instance-ids <InstanceId output> \
-  --document-name AWS-RunShellScript \
-  --parameters 'commands=["cd /opt/excalidraw && git pull && docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build"]'
-```
+Just push to the deployed branch (`master`). Every 5 minutes the server checks for new commits, then rebuilds and restarts ([update.sh](update.sh)). The log is at `/var/log/excalidraw-update.log`.
 
 ## Troubleshooting
 
@@ -68,10 +60,11 @@ To watch the first boot: in the EC2 console, open the instance and choose **Acti
 ## Delete
 
 ```bash
-aws cloudformation delete-stack --stack-name excalidraw
+aws cloudformation delete-stack --stack-name excalidraw \
+  --role-arn arn:aws:iam::$ACCOUNT_ID:role/excalidraw-cloudformation
 ```
 
-The DynamoDB table and S3 bucket are kept (`DeletionPolicy: Retain`) so drawings aren't lost by accident. Delete them in the console if you really want them gone.
+The DynamoDB table and S3 bucket are kept (`DeletionPolicy: Retain`) so drawings aren't lost by accident. Because their names are fixed, delete them in the console before creating the stack again.
 
 ## Local development
 

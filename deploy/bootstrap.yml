@@ -1,0 +1,257 @@
+# One-time setup, run by an admin (e.g. in AWS CloudShell):
+#
+#   aws cloudformation deploy --template-file deploy/bootstrap.yml \
+#     --stack-name excalidraw-bootstrap --capabilities CAPABILITY_NAMED_IAM \
+#     --parameter-overrides DeployUser=<IAM user that deploys>
+#
+# Creates:
+# - excalidraw-cloudformation: the role CloudFormation uses to create the
+#   resources of aws.yml, scoped to their fixed names / Project=excalidraw tag
+# - excalidraw-deployer: the deploy user's policy. It can only run the
+#   "excalidraw" stack through that role, so it needs no wildcard resources.
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Least-privilege deployment roles for the excalidraw stack
+
+Parameters:
+  DeployUser:
+    Type: String
+    Description: Name of the IAM user that runs the deploy
+
+Resources:
+  DeployerPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: excalidraw-deployer
+      Users: [!Ref DeployUser]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: RunTheExcalidrawStack
+            Effect: Allow
+            Action:
+              - cloudformation:CreateChangeSet
+              - cloudformation:DescribeChangeSet
+              - cloudformation:ExecuteChangeSet
+              - cloudformation:DeleteChangeSet
+              - cloudformation:DescribeStacks
+              - cloudformation:DescribeStackEvents
+              - cloudformation:DeleteStack
+            # AWS appends a generated id to stack ARNs:
+            # stack/<name>/<uuid>, so the id part can't be spelled out
+            Resource: !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/excalidraw/*
+          - Sid: HandTheServiceRoleToCloudFormationOnly
+            Effect: Allow
+            Action: iam:PassRole
+            Resource: !GetAtt ServiceRole.Arn
+            Condition:
+              StringEquals:
+                iam:PassedToService: cloudformation.amazonaws.com
+          - Sid: UbuntuImageLookup
+            Effect: Allow
+            Action: ssm:GetParameters
+            Resource: !Sub arn:aws:ssm:${AWS::Region}::parameter/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+
+  ServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: excalidraw-cloudformation
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: cloudformation.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      Tags:
+        - { Key: Project, Value: excalidraw }
+      Policies:
+        - PolicyName: excalidraw-stack-resources
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ReadOnlyCallsWithoutResourceLevelSupport
+                Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:DescribeInstanceStatus
+                  - ec2:DescribeInstanceTypes
+                  - ec2:DescribeImages
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeAddresses
+                  - ec2:DescribeLaunchTemplates
+                  - ec2:DescribeLaunchTemplateVersions
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DescribeVolumes
+                  - ec2:DescribeTags
+                  - ec2:DescribeAccountAttributes
+                Resource: "*"
+              - Sid: UbuntuImageLookup
+                Effect: Allow
+                Action: ssm:GetParameters
+                Resource: !Sub arn:aws:ssm:${AWS::Region}::parameter/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+
+              # EC2 ids are generated, so these match by tag instead of name
+              - Sid: Ec2CreateOnlyWhenTagged
+                Effect: Allow
+                Action:
+                  - ec2:RunInstances
+                  - ec2:CreateSecurityGroup
+                  - ec2:AllocateAddress
+                  - ec2:CreateLaunchTemplate
+                Resource:
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:volume/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:elastic-ip/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:launch-template/*
+                Condition:
+                  StringEquals:
+                    aws:RequestTag/Project: excalidraw
+              - Sid: Ec2UbuntuImagesOnly
+                Effect: Allow
+                Action: ec2:RunInstances
+                Resource: !Sub arn:aws:ec2:${AWS::Region}::image/*
+                Condition:
+                  StringEquals:
+                    ec2:Owner: "099720109477" # Canonical
+              - Sid: Ec2LaunchIntoDefaultVpc
+                Effect: Allow
+                Action: [ec2:RunInstances, ec2:CreateSecurityGroup]
+                Resource:
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:subnet/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:vpc/*
+              - Sid: Ec2UseTaggedSecurityGroupAndTemplate
+                Effect: Allow
+                Action: ec2:RunInstances
+                Resource:
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:launch-template/*
+                Condition:
+                  StringEquals:
+                    aws:ResourceTag/Project: excalidraw
+              - Sid: Ec2TagOnCreateOnly
+                Effect: Allow
+                Action: ec2:CreateTags
+                Resource:
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:volume/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:elastic-ip/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:launch-template/*
+                Condition:
+                  StringEquals:
+                    ec2:CreateAction:
+                      - RunInstances
+                      - CreateSecurityGroup
+                      - AllocateAddress
+                      - CreateLaunchTemplate
+              - Sid: Ec2ChangeTaggedOnly
+                Effect: Allow
+                Action:
+                  - ec2:TerminateInstances
+                  - ec2:StopInstances
+                  - ec2:StartInstances
+                  - ec2:ModifyInstanceAttribute
+                  - ec2:AuthorizeSecurityGroupIngress
+                  - ec2:RevokeSecurityGroupIngress
+                  - ec2:DeleteSecurityGroup
+                  - ec2:AssociateAddress
+                  - ec2:DisassociateAddress
+                  - ec2:ReleaseAddress
+                  - ec2:CreateLaunchTemplateVersion
+                  - ec2:ModifyLaunchTemplate
+                  - ec2:DeleteLaunchTemplate
+                Resource:
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:elastic-ip/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:launch-template/*
+                Condition:
+                  StringEquals:
+                    aws:ResourceTag/Project: excalidraw
+
+              # everything else has a fixed name (see aws.yml)
+              - Sid: BackendRole
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:GetRole
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/excalidraw-backend
+              - Sid: BackendRoleOnlyGetsSessionManager
+                Effect: Allow
+                Action: [iam:AttachRolePolicy, iam:DetachRolePolicy]
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/excalidraw-backend
+                Condition:
+                  ArnEquals:
+                    iam:PolicyARN: arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+              - Sid: BackendRoleOnlyToEc2
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/excalidraw-backend
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: ec2.amazonaws.com
+              - Sid: BackendInstanceProfile
+                Effect: Allow
+                Action:
+                  - iam:CreateInstanceProfile
+                  - iam:DeleteInstanceProfile
+                  - iam:GetInstanceProfile
+                  - iam:AddRoleToInstanceProfile
+                  - iam:RemoveRoleFromInstanceProfile
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:instance-profile/excalidraw-backend
+              - Sid: Table
+                Effect: Allow
+                Action:
+                  - dynamodb:CreateTable
+                  - dynamodb:DescribeTable
+                  - dynamodb:UpdateTable
+                  - dynamodb:DescribeContinuousBackups
+                  - dynamodb:UpdateContinuousBackups
+                  - dynamodb:DescribeTimeToLive
+                  - dynamodb:TagResource
+                  - dynamodb:UntagResource
+                  - dynamodb:ListTagsOfResource
+                Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/excalidraw
+              - Sid: Bucket
+                Effect: Allow
+                Action:
+                  - s3:CreateBucket
+                  - s3:GetBucketLocation
+                  - s3:PutBucketPublicAccessBlock
+                  - s3:GetBucketPublicAccessBlock
+                  - s3:PutBucketTagging
+                  - s3:GetBucketTagging
+                Resource: !Sub arn:aws:s3:::excalidraw-${AWS::AccountId}
+              - Sid: ResourceGroup
+                Effect: Allow
+                Action:
+                  - resource-groups:CreateGroup
+                  - resource-groups:DeleteGroup
+                  - resource-groups:GetGroup
+                  - resource-groups:GetGroupQuery
+                  - resource-groups:UpdateGroup
+                  - resource-groups:UpdateGroupQuery
+                  - resource-groups:Tag
+                  - resource-groups:Untag
+                  - resource-groups:GetTags
+                Resource: !Sub arn:aws:resource-groups:${AWS::Region}:${AWS::AccountId}:group/excalidraw
+
+Outputs:
+  ServiceRoleArn:
+    Value: !GetAtt ServiceRole.Arn
