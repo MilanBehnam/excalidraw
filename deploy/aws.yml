@@ -112,9 +112,62 @@ Resources:
       InstanceProfileName: excalidraw-backend
       Roles: [!Ref Role]
 
+  # own network (accounts may have no default VPC)
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.20.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - { Key: Project, Value: excalidraw }
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - { Key: Project, Value: excalidraw }
+
+  GatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  Subnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.20.0.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags:
+        - { Key: Project, Value: excalidraw }
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - { Key: Project, Value: excalidraw }
+
+  InternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayAttachment
+    Properties:
+      RouteTableId: !Ref RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  SubnetRoutes:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref Subnet
+      RouteTableId: !Ref RouteTable
+
   SecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
+      VpcId: !Ref Vpc
       GroupDescription: Excalidraw web (HTTP for the certificate challenge + HTTPS)
       SecurityGroupIngress:
         - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0 }
@@ -124,10 +177,27 @@ Resources:
 
   IP:
     Type: AWS::EC2::EIP
+    DependsOn: GatewayAttachment
     Properties:
       Domain: vpc
       Tags:
         - { Key: Project, Value: excalidraw }
+
+  # the fixed IP is attached before the instance boots, so its setup script
+  # has internet access from the start
+  NetworkInterface:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      SubnetId: !Ref Subnet
+      GroupSet: [!GetAtt SecurityGroup.GroupId]
+      Tags:
+        - { Key: Project, Value: excalidraw }
+
+  IPAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt IP.AllocationId
+      NetworkInterfaceId: !Ref NetworkInterface
 
   LaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
@@ -137,12 +207,9 @@ Resources:
           Tags:
             - { Key: Project, Value: excalidraw }
       LaunchTemplateData:
-        # the instance's disk and network interface
+        # the instance's disk
         TagSpecifications:
           - ResourceType: volume
-            Tags:
-              - { Key: Project, Value: excalidraw }
-          - ResourceType: network-interface
             Tags:
               - { Key: Project, Value: excalidraw }
         MetadataOptions:
@@ -155,11 +222,14 @@ Resources:
 
   Instance:
     Type: AWS::EC2::Instance
+    DependsOn: [IPAssociation, SubnetRoutes, InternetRoute]
     Properties:
       ImageId: !Ref ImageId
       InstanceType: !Ref InstanceType
       IamInstanceProfile: !Ref InstanceProfile
-      SecurityGroupIds: [!GetAtt SecurityGroup.GroupId]
+      NetworkInterfaces:
+        - DeviceIndex: "0"
+          NetworkInterfaceId: !Ref NetworkInterface
       LaunchTemplate:
         LaunchTemplateId: !Ref LaunchTemplate
         Version: !GetAtt LaunchTemplate.LatestVersionNumber
@@ -208,12 +278,6 @@ Resources:
             - { Key: Project, Values: [excalidraw] }
       Tags:
         - { Key: Project, Value: excalidraw }
-
-  IPAssociation:
-    Type: AWS::EC2::EIPAssociation
-    Properties:
-      AllocationId: !GetAtt IP.AllocationId
-      InstanceId: !Ref Instance
 
 Outputs:
   Url:

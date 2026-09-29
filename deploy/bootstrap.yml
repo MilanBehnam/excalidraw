@@ -88,6 +88,10 @@ Resources:
                   - ec2:DescribeVolumes
                   - ec2:DescribeTags
                   - ec2:DescribeAccountAttributes
+                  - ec2:DescribeAvailabilityZones
+                  - ec2:DescribeInternetGateways
+                  - ec2:DescribeRouteTables
+                  - ec2:DescribeVpcAttribute
                 Resource: "*"
               - Sid: UbuntuImageLookup
                 Effect: Allow
@@ -102,7 +106,16 @@ Resources:
                   - ec2:CreateSecurityGroup
                   - ec2:AllocateAddress
                   - ec2:CreateLaunchTemplate
+                  - ec2:CreateVpc
+                  - ec2:CreateSubnet
+                  - ec2:CreateInternetGateway
+                  - ec2:CreateRouteTable
+                  - ec2:CreateNetworkInterface
                 Resource:
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:vpc/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:subnet/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:internet-gateway/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:route-table/*
                   - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
                   - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:volume/*
                   - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*
@@ -119,12 +132,22 @@ Resources:
                 Condition:
                   StringEquals:
                     ec2:Owner: "099720109477" # Canonical
-              - Sid: Ec2LaunchIntoDefaultVpc
+              - Sid: Ec2UseTaggedNetwork
                 Effect: Allow
-                Action: [ec2:RunInstances, ec2:CreateSecurityGroup]
+                Action:
+                  - ec2:RunInstances
+                  - ec2:CreateSecurityGroup
+                  - ec2:CreateSubnet
+                  - ec2:CreateRouteTable
+                  - ec2:CreateNetworkInterface
                 Resource:
                   - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:subnet/*
                   - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:vpc/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*
+                Condition:
+                  StringEquals:
+                    aws:ResourceTag/Project: excalidraw
               - Sid: Ec2UseTaggedSecurityGroupAndTemplate
                 Effect: Allow
                 Action: ec2:RunInstances
@@ -138,6 +161,10 @@ Resources:
                 Effect: Allow
                 Action: ec2:CreateTags
                 Resource:
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:vpc/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:subnet/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:internet-gateway/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:route-table/*
                   - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
                   - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:volume/*
                   - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*
@@ -151,6 +178,11 @@ Resources:
                       - CreateSecurityGroup
                       - AllocateAddress
                       - CreateLaunchTemplate
+                      - CreateVpc
+                      - CreateSubnet
+                      - CreateInternetGateway
+                      - CreateRouteTable
+                      - CreateNetworkInterface
               - Sid: Ec2ChangeTaggedOnly
                 Effect: Allow
                 Action:
@@ -167,7 +199,25 @@ Resources:
                   - ec2:CreateLaunchTemplateVersion
                   - ec2:ModifyLaunchTemplate
                   - ec2:DeleteLaunchTemplate
+                  - ec2:DeleteVpc
+                  - ec2:ModifyVpcAttribute
+                  - ec2:AttachInternetGateway
+                  - ec2:DetachInternetGateway
+                  - ec2:DeleteInternetGateway
+                  - ec2:DeleteSubnet
+                  - ec2:ModifySubnetAttribute
+                  - ec2:CreateRoute
+                  - ec2:DeleteRoute
+                  - ec2:DeleteRouteTable
+                  - ec2:AssociateRouteTable
+                  - ec2:DisassociateRouteTable
+                  - ec2:DeleteNetworkInterface
+                  - ec2:ModifyNetworkInterfaceAttribute
                 Resource:
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:vpc/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:subnet/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:internet-gateway/*
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:route-table/*
                   - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
                   - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*
                   - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*
