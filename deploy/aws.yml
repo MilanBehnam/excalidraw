@@ -259,10 +259,10 @@ Resources:
             PASSCODE=${Passcode}
             EOF
             chmod 600 deploy/.env
+            # before the first build, so a failed build is retried by the next push
+            echo '*/5 * * * * root flock -n /run/excalidraw-update.lock /opt/excalidraw/deploy/update.sh >> /var/log/excalidraw-update.log 2>&1' > /etc/cron.d/excalidraw-update
             docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
 
-            # pushes to ${Branch} get deployed automatically
-            echo '*/5 * * * * root flock -n /run/excalidraw-update.lock /opt/excalidraw/deploy/update.sh >> /var/log/excalidraw-update.log 2>&1' > /etc/cron.d/excalidraw-update
           - SiteDomain: !If [HasDomain, !Ref Domain, !Sub "${IP}.sslip.io"]
 
   # all Project=excalidraw resources in one place (Resource Groups console)
