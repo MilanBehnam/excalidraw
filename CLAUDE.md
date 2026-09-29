@@ -32,3 +32,13 @@ yarn fix             # Auto-fix formatting and linting issues
 - Internal packages use path aliases (see `vitest.config.mts`)
 - Build system uses esbuild for packages, Vite for the app
 - TypeScript throughout with strict configuration
+
+## Collab backend & collections (fork: MilanBehnam/excalidraw)
+
+- `backend/`: Node 24 server (run TS directly), socket.io rooms + API for collections/scenes/images in DynamoDB/S3. All data E2E-encrypted client-side.
+- `excalidraw-app/collections/`: "My collections" sidebar tab. A file = collab room (room id = file id, key = collection key).
+- `excalidraw-app/data/backend.ts`: client for the backend (replaces Firebase for collab rooms).
+- Local: `docker compose -f backend/docker-compose.yml up -d --build` (passcode `dev`) + `yarn start` → http://localhost:3001
+- Backend test: `docker compose -f backend/docker-compose.yml exec -e PASSCODE=dev backend node --test test.ts`
+- AWS: `deploy/bootstrap.yml` (one-time roles, done) → `deploy/aws.yml` (stack `excalidraw`, us-east-1). Server auto-deploys pushes to `master` every 5 min. See `deploy/README.md`.
+- Remotes: `origin` = fork, `upstream` = excalidraw/excalidraw.
