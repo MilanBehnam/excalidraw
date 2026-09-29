@@ -40,5 +40,5 @@ yarn fix             # Auto-fix formatting and linting issues
 - `excalidraw-app/data/backend.ts`: client for the backend (replaces Firebase for collab rooms).
 - Local: `docker compose -f backend/docker-compose.yml up -d --build` (passcode `dev`) + `yarn start` → http://localhost:3001
 - Backend test: `docker compose -f backend/docker-compose.yml exec -e PASSCODE=dev backend node --test test.ts`
-- AWS: `deploy/bootstrap.yml` (one-time roles, done) → `deploy/aws.yml` (stack `excalidraw`, us-east-1). Server auto-deploys pushes to `master` every 5 min. See `deploy/README.md`.
+- AWS: `deploy/bootstrap.yml` (one-time roles, done) → `deploy/aws.yml` (stack `excalidraw`, eu-central-1). Server auto-deploys pushes to `master` every 5 min. See `deploy/README.md`.
 - Remotes: `origin` = fork, `upstream` = excalidraw/excalidraw.
