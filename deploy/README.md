@@ -9,6 +9,28 @@ One CloudFormation stack ([aws.yml](aws.yml)) creates everything:
   - **Caddy**: automatic HTTPS.
 - An IAM role, so the server needs no stored AWS keys.
 
+## Deployer permissions
+
+[deployer-policy.json](deployer-policy.json) is a least-privilege IAM policy for the user that runs the deploy. It's scoped like this:
+
+- **Tags:** EC2 resources can only be created with the tag `Project=excalidraw`, and only resources with that tag can be changed or deleted. Tags can't be added to other existing resources.
+- **Names:** IAM, DynamoDB, S3 and the stack itself are limited to names starting with `excalidraw` (CloudFormation names resources after the stack).
+- **iam:PassRole:** only this stack's role, and only to EC2.
+- **Wildcards:** only for read-only calls that AWS can't scope to a resource (`Describe*`, `tag:GetResources`, `ssm:GetCommandInvocation`).
+
+Fill in your account ID and attach it to the deploy user:
+
+```bash
+ACCOUNT_ID=123456789012   # your account
+sed "s/<ACCOUNT_ID>/$ACCOUNT_ID/g" deploy/deployer-policy.json > /tmp/excalidraw-deployer.json
+aws iam create-policy --policy-name excalidraw-deployer \
+  --policy-document file:///tmp/excalidraw-deployer.json
+aws iam attach-user-policy --user-name <your IAM user> \
+  --policy-arn arn:aws:iam::$ACCOUNT_ID:policy/excalidraw-deployer
+```
+
+The stack must be named `excalidraw` in `us-east-1`; the policy is scoped to that. Every project resource then appears together under the **Resource Groups** console → group `excalidraw`.
+
 ## Deploy
 
 ```bash

@@ -5,6 +5,10 @@
 #   aws cloudformation deploy --template-file deploy/aws.yml \
 #     --stack-name excalidraw --capabilities CAPABILITY_IAM \
 #     --parameter-overrides Passcode=<pick one>
+#
+# Every resource is tagged Project=excalidraw and named after the stack, so
+# the deployer's permissions can be scoped to them (deployer-policy.json).
+# The stack must be called "excalidraw" for that policy.
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Excalidraw with live collaboration and shared collections
 
@@ -48,6 +52,8 @@ Resources:
         - { AttributeName: sk, KeyType: RANGE }
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
+      Tags:
+        - { Key: Project, Value: excalidraw }
 
   Bucket:
     Type: AWS::S3::Bucket
@@ -58,6 +64,8 @@ Resources:
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
+      Tags:
+        - { Key: Project, Value: excalidraw }
 
   Role:
     Type: AWS::IAM::Role
@@ -90,6 +98,8 @@ Resources:
               - Effect: Allow
                 Action: s3:ListBucket
                 Resource: !GetAtt Bucket.Arn
+      Tags:
+        - { Key: Project, Value: excalidraw }
 
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -103,16 +113,32 @@ Resources:
       SecurityGroupIngress:
         - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0 }
         - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0 }
+      Tags:
+        - { Key: Project, Value: excalidraw }
 
   IP:
     Type: AWS::EC2::EIP
     Properties:
       Domain: vpc
+      Tags:
+        - { Key: Project, Value: excalidraw }
 
   LaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
     Properties:
+      TagSpecifications:
+        - ResourceType: launch-template
+          Tags:
+            - { Key: Project, Value: excalidraw }
       LaunchTemplateData:
+        # the instance's disk and network interface
+        TagSpecifications:
+          - ResourceType: volume
+            Tags:
+              - { Key: Project, Value: excalidraw }
+          - ResourceType: network-interface
+            Tags:
+              - { Key: Project, Value: excalidraw }
         MetadataOptions:
           HttpTokens: required
           # containers are one network hop further away than the host
@@ -133,6 +159,7 @@ Resources:
         Version: !GetAtt LaunchTemplate.LatestVersionNumber
       Tags:
         - { Key: Name, Value: !Ref AWS::StackName }
+        - { Key: Project, Value: excalidraw }
       UserData:
         Fn::Base64: !Sub
           - |
@@ -158,6 +185,20 @@ Resources:
             chmod 600 deploy/.env
             docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
           - SiteDomain: !If [HasDomain, !Ref Domain, !Sub "${IP}.sslip.io"]
+
+  # all Project=excalidraw resources in one place (Resource Groups console)
+  ResourceGroup:
+    Type: AWS::ResourceGroups::Group
+    Properties:
+      Name: !Ref AWS::StackName
+      ResourceQuery:
+        Type: TAG_FILTERS_1_0
+        Query:
+          ResourceTypeFilters: [AWS::AllSupported]
+          TagFilters:
+            - { Key: Project, Values: [excalidraw] }
+      Tags:
+        - { Key: Project, Value: excalidraw }
 
   IPAssociation:
     Type: AWS::EC2::EIPAssociation
