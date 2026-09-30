@@ -290,6 +290,30 @@ Resources:
                   - s3:PutBucketTagging
                   - s3:GetBucketTagging
                 Resource: !Sub arn:aws:s3:::excalidraw-${AWS::AccountId}
+              # distribution ids are generated; scoped to this account's
+              # distributions and to the Project tag where CloudFront supports it
+              - Sid: CdnCreateOnlyWhenTagged
+                Effect: Allow
+                Action:
+                  - cloudfront:CreateDistribution
+                  - cloudfront:TagResource
+                Resource: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/*
+                Condition:
+                  StringEquals:
+                    aws:RequestTag/Project: excalidraw
+              - Sid: CdnChangeTaggedOnly
+                Effect: Allow
+                Action:
+                  - cloudfront:GetDistribution
+                  - cloudfront:GetDistributionConfig
+                  - cloudfront:UpdateDistribution
+                  - cloudfront:DeleteDistribution
+                  - cloudfront:ListTagsForResource
+                  - cloudfront:UntagResource
+                Resource: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/*
+                Condition:
+                  StringEquals:
+                    aws:ResourceTag/Project: excalidraw
               - Sid: ResourceGroup
                 Effect: Allow
                 Action:

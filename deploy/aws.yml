@@ -279,7 +279,37 @@ Resources:
       Tags:
         - { Key: Project, Value: excalidraw }
 
+  # AWS-hosted address (https://<id>.cloudfront.net) in front of the server,
+  # for networks whose firewall blocks sslip.io. Nothing is cached: every
+  # request, incl. the live-collaboration WebSocket, goes to the server.
+  Cdn:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        PriceClass: PriceClass_100
+        HttpVersion: http2
+        Origins:
+          - Id: server
+            DomainName: !If [HasDomain, !Ref Domain, !Sub "${IP}.sslip.io"]
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+        DefaultCacheBehavior:
+          TargetOriginId: server
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+          Compress: true
+          # managed policies: CachingDisabled, AllViewerExceptHostHeader
+          # (the server's HTTPS site answers to its own host name)
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+          OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+      Tags:
+        - { Key: Project, Value: excalidraw }
+
 Outputs:
+  CdnUrl:
+    Value: !Sub "https://${Cdn.DomainName}"
   Url:
     Value:
       !If [HasDomain, !Sub "https://${Domain}", !Sub "https://${IP}.sslip.io"]
