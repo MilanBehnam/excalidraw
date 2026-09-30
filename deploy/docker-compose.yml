@@ -16,6 +16,8 @@ services:
       BUCKET_NAME: ${BUCKET_NAME:?set BUCKET_NAME from the stack outputs}
       COGNITO_USER_POOL_ID: ${COGNITO_USER_POOL_ID:?set from the stack outputs}
       COGNITO_CLIENT_ID: ${COGNITO_CLIENT_ID:?set from the stack outputs}
+      # the site on GitHub Pages calls the backend cross-origin
+      CORS_ORIGIN: ${CORS_ORIGIN:-}
 
   caddy:
     image: caddy:2-alpine

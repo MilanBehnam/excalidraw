@@ -41,5 +41,6 @@ yarn fix             # Auto-fix formatting and linting issues
 - `excalidraw-app/data/backend.ts`: client for the backend (replaces Firebase for collab rooms).
 - Local: `docker compose -f backend/docker-compose.yml up -d --build` (DEV_FAKE_AUTH: any email signs in) + `yarn start` → http://localhost:3001; a second user at http://bob.localhost:3001
 - Backend test: `docker compose -f backend/docker-compose.yml exec backend node --test test.ts`
-- AWS: `deploy/bootstrap.yml` (one-time roles, done) → `deploy/aws.yml` (stack `excalidraw`, eu-central-1). Live: https://d1mhzhxxlv4u5h.cloudfront.net (CloudFront, since some firewalls block sslip.io). Server auto-deploys pushes to `master` every 5 min. See `deploy/README.md`.
+- AWS: `deploy/bootstrap.yml` (one-time roles, done) → `deploy/aws.yml` (stack `excalidraw`, eu-central-1). Backend + app at https://d1mhzhxxlv4u5h.cloudfront.net. Images built by GitHub Actions (`deploy-images.yml`, GHCR); the server pulls them every 5 min (`deploy/update.sh`). See `deploy/README.md`.
+- Main address: https://milanbehnam.github.io/excalidraw/ (GitHub Pages, `deploy-pages.yml`, backend via repo variable `BACKEND_URL` + server `CORS_ORIGIN`). App code must not assume it's served at `/`: use `getAppHomeUrl()` / `import.meta.env.BASE_URL`.
 - Remotes: `origin` = fork, `upstream` = excalidraw/excalidraw.

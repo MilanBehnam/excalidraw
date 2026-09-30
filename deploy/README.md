@@ -52,7 +52,15 @@ Accounts are **AWS Cognito** (user pool `excalidraw`): sign-up with email and a 
 
 Push to `master`. GitHub Actions ([deploy-images.yml](../.github/workflows/deploy-images.yml)) builds the app and backend images, taking about 5 minutes, and publishes them to GitHub Container Registry (`ghcr.io/<owner>/excalidraw-app` and `-backend`, tagged with the commit). Every 5 minutes the server pulls the images for the latest commit and restarts ([update.sh](update.sh)); it never builds anything itself. The log is at `/var/log/excalidraw-update.log`.
 
-The two packages must be **public**, so the server can pull them without a login. On GitHub, go to your profile → Packages → each package → Package settings → Change visibility.
+Packages published from a public repository are public, so the server pulls them without logging in.
+
+## The site on GitHub Pages
+
+The same app is also published to **https://<owner>.github.io/<repo>/** ([deploy-pages.yml](../.github/workflows/deploy-pages.yml)) on every push. It talks to this backend cross-origin. The setup:
+
+- Repository variable `BACKEND_URL` = the stack's `CdnUrl` output.
+- Settings → Pages → Source: **GitHub Actions**.
+- `CORS_ORIGIN=https://<owner>.github.io` in the server's `deploy/.env`.
 
 ## Troubleshooting
 

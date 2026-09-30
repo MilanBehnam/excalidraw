@@ -92,6 +92,7 @@ import {
   isExcalidrawPlusSignedUser,
   STORAGE_KEYS,
   SYNC_BROWSER_TABS_TIMEOUT,
+  getAppHomeUrl,
 } from "./app_constants";
 import Collab, {
   collabAPIAtom,
@@ -285,7 +286,7 @@ const initializeScene = async (opts: {
       }
       scene.scrollToContent = true;
       if (!roomLinkData) {
-        window.history.replaceState({}, APP_NAME, window.location.origin);
+        window.history.replaceState({}, APP_NAME, getAppHomeUrl());
       }
     } else {
       // https://github.com/excalidraw/excalidraw/issues/1919
@@ -302,10 +303,10 @@ const initializeScene = async (opts: {
       }
 
       roomLinkData = null;
-      window.history.replaceState({}, APP_NAME, window.location.origin);
+      window.history.replaceState({}, APP_NAME, getAppHomeUrl());
     }
   } else if (externalUrlMatch) {
-    window.history.replaceState({}, APP_NAME, window.location.origin);
+    window.history.replaceState({}, APP_NAME, getAppHomeUrl());
 
     const url = externalUrlMatch[1];
     try {
@@ -578,7 +579,7 @@ const ExcalidrawWrapper = () => {
       !isCollabDisabled &&
       openShareLinkFromUrl(
         excalidrawAPI,
-        collabAPI?.getActiveRoomLink() || window.location.origin,
+        collabAPI?.getActiveRoomLink() || getAppHomeUrl(),
       );
 
     initializeScene({ collabAPI, excalidrawAPI }).then(async (data) => {

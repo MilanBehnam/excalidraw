@@ -252,14 +252,14 @@ export default defineConfig(({ mode }) => {
               type: "image/png",
             },
           ],
-          start_url: "/",
+          start_url: "./",
           id: "excalidraw",
           display: "standalone",
           theme_color: "#121212",
           background_color: "#ffffff",
           file_handlers: [
             {
-              action: "/",
+              action: "./",
               accept: {
                 "application/vnd.excalidraw+json": [".excalidraw"],
               },

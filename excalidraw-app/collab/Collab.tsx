@@ -62,6 +62,7 @@ import {
   WS_SUBTYPES,
   SYNC_FULL_SCENE_INTERVAL_MS,
   WS_EVENTS,
+  getAppHomeUrl,
 } from "../app_constants";
 import {
   generateCollaborationLinkData,
@@ -405,7 +406,7 @@ class Collab extends PureComponent<CollabProps, CollabState> {
       // that could have been saved in other tabs while we were collaborating
       resetBrowserStateVersions();
 
-      window.history.pushState({}, APP_NAME, window.location.origin);
+      window.history.pushState({}, APP_NAME, getAppHomeUrl());
       this.destroySocketClient();
 
       LocalData.fileStorage.reset();

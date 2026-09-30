@@ -1,0 +1,52 @@
+name: Deploy site
+
+# Publishes the app to GitHub Pages (https://<owner>.github.io/<repo>/) on
+# every push to master. Collaboration and accounts still run on the AWS
+# backend, set as the repository variable BACKEND_URL.
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: yarn
+
+      - run: yarn install --frozen-lockfile
+
+      - name: Build
+        working-directory: excalidraw-app
+        run: npx vite build --base "/${{ github.event.repository.name }}/"
+        env:
+          VITE_APP_WS_SERVER_URL: ${{ vars.BACKEND_URL }}
+          VITE_APP_DISABLE_SENTRY: "true"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: excalidraw-app/build
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

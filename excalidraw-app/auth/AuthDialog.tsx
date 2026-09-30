@@ -4,6 +4,7 @@ import { FilledButton } from "@excalidraw/excalidraw/components/FilledButton";
 import { useRef, useState } from "react";
 
 import { appJotaiStore, useAtomValue, useSetAtom } from "../app-jotai";
+import { getAppHomeUrl } from "../app_constants";
 import { deleteMyData, openShareLinkFromUrl } from "../collections/collections";
 
 import {
@@ -75,7 +76,7 @@ const AuthDialogContent = ({
     close();
     // a share link that was waiting for sign-in
     if (excalidrawAPI) {
-      openShareLinkFromUrl(excalidrawAPI, window.location.origin);
+      openShareLinkFromUrl(excalidrawAPI, getAppHomeUrl());
     }
   };
 

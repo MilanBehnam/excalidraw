@@ -35,6 +35,13 @@ export const FIREBASE_STORAGE_PREFIXES = {
 
 export const ROOM_ID_BYTES = 10;
 
+/**
+ * The app's own address without a hash, e.g. https://example.com/ or, when
+ * served from a sub-path (GitHub Pages), https://user.github.io/excalidraw/
+ */
+export const getAppHomeUrl = () =>
+  `${window.location.origin}${import.meta.env.BASE_URL}`;
+
 export const STORAGE_KEYS = {
   LOCAL_STORAGE_ELEMENTS: "excalidraw",
   LOCAL_STORAGE_APP_STATE: "excalidraw-state",
