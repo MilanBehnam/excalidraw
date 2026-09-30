@@ -343,6 +343,48 @@ Resources:
                 Condition:
                   StringEquals:
                     aws:ResourceTag/Project: excalidraw
+              - Sid: AutoConfirmFunction
+                Effect: Allow
+                Action:
+                  - lambda:CreateFunction
+                  - lambda:GetFunction
+                  - lambda:GetFunctionConfiguration
+                  - lambda:DeleteFunction
+                  - lambda:UpdateFunctionCode
+                  - lambda:UpdateFunctionConfiguration
+                  - lambda:AddPermission
+                  - lambda:RemovePermission
+                  - lambda:GetPolicy
+                  - lambda:TagResource
+                  - lambda:UntagResource
+                  - lambda:ListTags
+                  - lambda:GetRuntimeManagementConfig
+                Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:excalidraw-autoconfirm
+              - Sid: AutoConfirmRole
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:GetRole
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/excalidraw-autoconfirm
+              - Sid: AutoConfirmRoleOnlyGetsLogging
+                Effect: Allow
+                Action: [iam:AttachRolePolicy, iam:DetachRolePolicy]
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/excalidraw-autoconfirm
+                Condition:
+                  ArnEquals:
+                    iam:PolicyARN: arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+              - Sid: AutoConfirmRoleOnlyToLambda
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/excalidraw-autoconfirm
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: lambda.amazonaws.com
               - Sid: ResourceGroup
                 Effect: Allow
                 Action:

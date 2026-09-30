@@ -109,12 +109,12 @@ const AuthDialogContent = ({
       case "signUp":
         return run(async () => {
           await signUp(cleanEmail, password, name.trim());
-          // fake dev logins are signed in right away, real ones need the code
-          if (appJotaiStore.get(authUserAtom)) {
-            signedIn();
-          } else {
-            switchTo("confirm", `We sent a code to ${cleanEmail}.`);
+          // accounts are confirmed right away (AutoConfirm in deploy/aws.yml);
+          // should one need a code, signIn fails and `run` asks for it
+          if (!appJotaiStore.get(authUserAtom)) {
+            await signIn(cleanEmail, password);
           }
+          signedIn();
         });
       case "confirm":
         return run(async () => {

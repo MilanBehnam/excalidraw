@@ -46,7 +46,7 @@ Optional parameters:
 - `InstanceType=t3.medium`: faster builds.
 - `RepoUrl=…` and `Branch=…`: deploy another fork or branch.
 
-Accounts are **AWS Cognito** (user pool `excalidraw`): sign-up with email and a verification code, login, password reset. Cognito sends those emails itself, up to 50 a day, no domain needed. Collections and quick live rooms need an account; joining a quick room via its link doesn't.
+Accounts are **AWS Cognito** (user pool `excalidraw`). Sign-ups are confirmed right away, without an email code, by the `excalidraw-autoconfirm` function: Cognito's shared email sender was unreliable without a domain of our own. The trade-off is that email addresses aren't verified, so whoever signs up with an address gets what's shared with it. Password reset still emails a code; if it doesn't arrive, an admin can run `aws cognito-idp admin-set-user-password`. Collections and quick live rooms need an account; joining a quick room via its link doesn't.
 
 ## Updates
 

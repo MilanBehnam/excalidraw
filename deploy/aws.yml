@@ -105,8 +105,55 @@ Resources:
         DefaultEmailOption: CONFIRM_WITH_CODE
         EmailSubject: Your Excalidraw code
         EmailMessage: "Your Excalidraw code is {####}"
+      # confirms sign-ups right away (no email code, see AutoConfirm)
+      LambdaConfig:
+        PreSignUp: !GetAtt AutoConfirm.Arn
       UserPoolTags:
         Project: excalidraw
+
+  # Verification emails from Cognito's shared sender often never arrive
+  # (no own domain), so sign-ups are confirmed without them. Note: emails are
+  # then unverified, so whoever signs up with an address gets what's shared
+  # with it.
+  AutoConfirm:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: excalidraw-autoconfirm
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Role: !GetAtt AutoConfirmRole.Arn
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => {
+            event.response.autoConfirmUser = true;
+            event.response.autoVerifyEmail = true;
+            return event;
+          };
+      Tags:
+        - { Key: Project, Value: excalidraw }
+
+  AutoConfirmRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: excalidraw-autoconfirm
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Tags:
+        - { Key: Project, Value: excalidraw }
+
+  AutoConfirmPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt AutoConfirm.Arn
+      Action: lambda:InvokeFunction
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !GetAtt UserPool.Arn
 
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient
