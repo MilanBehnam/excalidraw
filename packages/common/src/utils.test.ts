@@ -44,6 +44,17 @@ describe("@excalidraw/common/utils", () => {
     });
   });
 
+  describe("isWritableElement()", () => {
+    it("treats text-like inputs as writable, so typing skips shortcuts", () => {
+      const input = (type: string) =>
+        Object.assign(document.createElement("input"), { type });
+      for (const type of ["text", "email", "password", "url", "tel"]) {
+        expect(isWritableElement(input(type))).toBe(true);
+      }
+      expect(isWritableElement(input("checkbox"))).toBe(false);
+    });
+  });
+
   describe("isTransparent()", () => {
     it("should return true when color is rgb transparent", () => {
       expect(isTransparent("#ff00")).toEqual(true);

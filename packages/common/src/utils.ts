@@ -96,6 +96,17 @@ export const isInteractive = (target: Element | EventTarget | null) => {
   );
 };
 
+/** input types you type text into (keys shouldn't trigger shortcuts) */
+const WRITABLE_INPUT_TYPES = new Set([
+  "text",
+  "number",
+  "password",
+  "search",
+  "email",
+  "url",
+  "tel",
+]);
+
 export const isWritableElement = (
   target: Element | EventTarget | null,
 ): target is
@@ -111,10 +122,7 @@ export const isWritableElement = (
       target instanceof targetWindow.HTMLBRElement || // newline in wysiwyg
       target instanceof targetWindow.HTMLTextAreaElement ||
       (target instanceof targetWindow.HTMLInputElement &&
-        (target.type === "text" ||
-          target.type === "number" ||
-          target.type === "password" ||
-          target.type === "search")) ||
+        WRITABLE_INPUT_TYPES.has(target.type)) ||
       (target instanceof targetWindow.HTMLElement &&
         target.closest(".cm-editor") !== null))
   );
