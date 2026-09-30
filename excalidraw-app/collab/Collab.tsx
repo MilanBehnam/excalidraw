@@ -53,6 +53,7 @@ import type {
 import type { Mutable, ValueOf } from "@excalidraw/common/utility-types";
 
 import { appJotaiStore, atom } from "../app-jotai";
+import { authUserAtom, getIdToken, openAuthDialog } from "../auth/auth";
 import {
   CURSOR_SYNC_TIMEOUT,
   FILE_UPLOAD_MAX_BYTES,
@@ -125,6 +126,8 @@ export interface CollabAPI {
   getActiveRoomLink: CollabInstance["getActiveRoomLink"];
   setCollabError: CollabInstance["setErrorDialog"];
   setUserToFollow: CollabInstance["setUserToFollow"];
+  startVersionPreview: CollabInstance["startVersionPreview"];
+  endVersionPreview: CollabInstance["endVersionPreview"];
 }
 
 interface CollabProps {
@@ -245,6 +248,8 @@ class Collab extends PureComponent<CollabProps, CollabState> {
       getActiveRoomLink: this.getActiveRoomLink,
       setCollabError: this.setErrorDialog,
       setUserToFollow: this.setUserToFollow,
+      startVersionPreview: this.startVersionPreview,
+      endVersionPreview: this.endVersionPreview,
     };
 
     appJotaiStore.set(collabAPIAtom, collabAPI);
@@ -342,6 +347,11 @@ class Collab extends PureComponent<CollabProps, CollabState> {
         this.handleRemoteSceneUpdate(this._reconcileElements(storedElements));
       }
     } catch (error: any) {
+      // access was revoked or the file deleted: the "access-denied" socket
+      // event already told the user, a save error would only confuse
+      if (error.status === 401 || error.status === 403) {
+        return;
+      }
       const errorMessage = /is longer than.*?bytes/.test(error.message)
         ? t("errors.collabSaveFailed_sizeExceeded")
         : t("errors.collabSaveFailed");
@@ -368,6 +378,7 @@ class Collab extends PureComponent<CollabProps, CollabState> {
   };
 
   stopCollaboration = (keepRemoteState = true) => {
+    this.endVersionPreview(false);
     this.queueBroadcastAllElements.cancel();
     this.queueSaveCollabRoom.cancel();
     this.loadImageFiles.cancel();
@@ -416,6 +427,7 @@ class Collab extends PureComponent<CollabProps, CollabState> {
   };
 
   private destroySocketClient = (opts?: { isUnload: boolean }) => {
+    this.preview = null;
     this.lastBroadcastedOrReceivedSceneVersion = -1;
     this.portal.close();
     this.fileManager.reset();
@@ -486,8 +498,16 @@ class Collab extends PureComponent<CollabProps, CollabState> {
   startCollaboration = async (
     existingRoomLinkData: null | { roomId: string; roomKey: string },
   ) => {
-    // state may not be flushed yet right after setUsername(), storage is
-    if (!this.state.username && !importUsernameFromLocalStorage()) {
+    const authUser = appJotaiStore.get(authUserAtom);
+    // new quick rooms use our storage, so starting one needs an account
+    if (!existingRoomLinkData && !authUser) {
+      openAuthDialog("Sign in to start a live session");
+      return null;
+    }
+    if (authUser) {
+      this.setUsername(authUser.name);
+    } else if (!this.state.username && !importUsernameFromLocalStorage()) {
+      // state may not be flushed yet right after setUsername(), storage is
       import("@excalidraw/random-username").then(({ getRandomUsername }) => {
         const username = getRandomUsername();
         this.setUsername(username);
@@ -539,6 +559,10 @@ class Collab extends PureComponent<CollabProps, CollabState> {
       this.portal.socket = this.portal.open(
         socketIOClient(import.meta.env.VITE_APP_WS_SERVER_URL, {
           transports: ["websocket", "polling"],
+          // collection files are only for people they're shared with
+          auth: (cb: (data: object) => void) => {
+            getIdToken().then((token) => cb({ token }));
+          },
         }),
         roomId,
         roomKey,
@@ -690,6 +714,18 @@ class Collab extends PureComponent<CollabProps, CollabState> {
       },
     );
 
+    this.portal.socket.on("access-denied", () => {
+      if (appJotaiStore.get(authUserAtom)) {
+        this.setErrorDialog(
+          "You don't have access to this file (anymore): it was deleted, or its owner hasn't shared it with you.",
+        );
+      } else {
+        openAuthDialog("Sign in to open this file");
+      }
+      // back to your own drawing
+      window.location.hash = "";
+    });
+
     this.portal.socket.on("first-in-room", async () => {
       if (this.portal.socket) {
         this.portal.socket.off("first-in-room");
@@ -815,6 +851,11 @@ class Collab extends PureComponent<CollabProps, CollabState> {
   private handleRemoteSceneUpdate = (
     elements: ReconciledExcalidrawElement[],
   ) => {
+    if (this.preview) {
+      // keep the canvas on the old version, apply it when going back to live
+      this.preview.liveElements = elements;
+      return;
+    }
     this.excalidrawAPI.updateScene({
       elements,
       captureUpdate: CaptureUpdateAction.NEVER,
@@ -930,8 +971,64 @@ class Collab extends PureComponent<CollabProps, CollabState> {
     return this.lastBroadcastedOrReceivedSceneVersion;
   };
 
+  /** the live scene (not the version being previewed) */
   public getSceneElementsIncludingDeleted = () => {
-    return this.excalidrawAPI.getSceneElementsIncludingDeleted();
+    return (
+      this.preview?.liveElements ??
+      this.excalidrawAPI.getSceneElementsIncludingDeleted()
+    );
+  };
+
+  // version preview
+  // ---------------------------------------------------------------------------
+
+  private preview: {
+    liveElements: readonly OrderedExcalidrawElement[];
+  } | null = null;
+
+  /** shows an old version read-only; the live file keeps syncing underneath */
+  startVersionPreview = (elements: readonly OrderedExcalidrawElement[]) => {
+    if (!this.preview) {
+      this.preview = {
+        liveElements: this.excalidrawAPI.getSceneElementsIncludingDeleted(),
+      };
+    }
+    this.excalidrawAPI.updateScene({
+      elements,
+      appState: { viewModeEnabled: true },
+      captureUpdate: CaptureUpdateAction.NEVER,
+    });
+    this.loadImageFiles();
+  };
+
+  /** back to the live file; `restore` makes the previewed version live */
+  endVersionPreview = (restore: boolean) => {
+    if (!this.preview) {
+      return;
+    }
+    const live = this.preview.liveElements;
+    const version = this.excalidrawAPI.getSceneElementsIncludingDeleted();
+    this.preview = null;
+
+    const versionIds = new Set(version.map((element) => element.id));
+    const elements = restore
+      ? [
+          // newer than the live elements, so the restore wins for everyone
+          ...bumpElementVersions(version, live),
+          // added after that version
+          ...live
+            .filter((element) => !versionIds.has(element.id))
+            .map((element) => newElementWith(element, { isDeleted: true })),
+        ]
+      : live;
+    this.excalidrawAPI.updateScene({
+      elements,
+      appState: { viewModeEnabled: false },
+      // a restore is a regular edit: undoable, synced and saved
+      captureUpdate: restore
+        ? CaptureUpdateAction.IMMEDIATELY
+        : CaptureUpdateAction.NEVER,
+    });
   };
 
   onPointerUpdate = throttle(
@@ -974,6 +1071,9 @@ class Collab extends PureComponent<CollabProps, CollabState> {
   };
 
   syncElements = (elements: readonly OrderedExcalidrawElement[]) => {
+    if (this.preview) {
+      return; // the canvas shows an old version, nothing to sync
+    }
     this.broadcastElements(elements);
     this.queueSaveCollabRoom();
   };
@@ -981,7 +1081,7 @@ class Collab extends PureComponent<CollabProps, CollabState> {
   queueBroadcastAllElements = throttle(() => {
     this.portal.broadcastScene(
       WS_SUBTYPES.UPDATE,
-      this.excalidrawAPI.getSceneElementsIncludingDeleted(),
+      this.getSceneElementsIncludingDeleted(),
       true,
     );
     const currentVersion = this.getLastBroadcastedOrReceivedSceneVersion();
@@ -996,9 +1096,7 @@ class Collab extends PureComponent<CollabProps, CollabState> {
     () => {
       if (this.portal.socketInitialized) {
         this.saveCollabRoom(
-          getSyncableElements(
-            this.excalidrawAPI.getSceneElementsIncludingDeleted(),
-          ),
+          getSyncableElements(this.getSceneElementsIncludingDeleted()),
         );
       }
     },

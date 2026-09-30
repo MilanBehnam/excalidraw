@@ -13,6 +13,8 @@ import { StoreIncrement } from "@excalidraw/element";
 import type { DurableIncrement, EphemeralIncrement } from "@excalidraw/element";
 
 import ExcalidrawApp from "../App";
+import { appJotaiStore } from "../app-jotai";
+import { authUserAtom } from "../auth/auth";
 
 const { h } = window;
 
@@ -186,6 +188,12 @@ describe("collaboration", () => {
       ]);
     });
 
+    // starting a new live room needs an account
+    appJotaiStore.set(authUserAtom, {
+      sub: "test",
+      email: "test@example.com",
+      name: "Test",
+    });
     // one form of force deletion happens when starting the collab, not to sync potentially sensitive data into the server
     window.collab.startCollaboration(null);
 

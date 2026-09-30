@@ -14,7 +14,8 @@ services:
       AWS_REGION: ${AWS_REGION:?set AWS_REGION, e.g. us-east-1}
       TABLE_NAME: ${TABLE_NAME:?set TABLE_NAME from the stack outputs}
       BUCKET_NAME: ${BUCKET_NAME:?set BUCKET_NAME from the stack outputs}
-      PASSCODE: ${PASSCODE:?set PASSCODE, needed to create collections}
+      COGNITO_USER_POOL_ID: ${COGNITO_USER_POOL_ID:?set from the stack outputs}
+      COGNITO_CLIENT_ID: ${COGNITO_CLIENT_ID:?set from the stack outputs}
 
   caddy:
     image: caddy:2-alpine

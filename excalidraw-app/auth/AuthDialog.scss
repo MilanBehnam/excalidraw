@@ -1,0 +1,62 @@
+.excalidraw {
+  .auth-dialog__form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .auth-dialog__field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    font-size: 0.875rem;
+
+    input {
+      font: inherit;
+      font-size: 1rem;
+      padding: 0.5rem 0.75rem;
+      border: 1px solid var(--default-border-color);
+      border-radius: var(--border-radius-lg);
+      background: var(--input-bg-color);
+      color: var(--text-primary-color);
+
+      &:focus {
+        outline: none;
+        border-color: var(--color-primary);
+      }
+    }
+  }
+
+  .auth-dialog__notice,
+  .auth-dialog__hint {
+    margin: 0;
+    font-size: 0.875rem;
+    color: var(--color-gray-60);
+  }
+
+  .auth-dialog__error {
+    margin: 0;
+    font-size: 0.875rem;
+    color: var(--color-danger);
+  }
+
+  .auth-dialog__links {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+
+    button {
+      font: inherit;
+      font-size: 0.875rem;
+      color: var(--color-primary);
+      background: none;
+      border: none;
+      padding: 0;
+      cursor: pointer;
+    }
+  }
+
+  .auth-dialog__danger {
+    color: var(--color-danger) !important;
+  }
+}

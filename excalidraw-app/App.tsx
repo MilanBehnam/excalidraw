@@ -21,7 +21,6 @@ import { ShareableLinkDialog } from "@excalidraw/excalidraw/components/Shareable
 import Trans from "@excalidraw/excalidraw/components/Trans";
 import {
   APP_NAME,
-  DEFAULT_SIDEBAR,
   EVENT,
   VERSION_TIMEOUT,
   debounce,
@@ -149,11 +148,9 @@ import "./index.scss";
 
 import { ExcalidrawPlusPromoBanner } from "./components/ExcalidrawPlusPromoBanner";
 import { AppSidebar } from "./components/AppSidebar";
-import {
-  COLLECTIONS_SIDEBAR_TAB,
-  ensureUsername,
-  importCollectionFromLink,
-} from "./collections/collections";
+import { openShareLinkFromUrl } from "./collections/collections";
+import { AuthDialog } from "./auth/AuthDialog";
+import { authUserAtom } from "./auth/auth";
 
 import type { CollabAPI } from "./collab/Collab";
 
@@ -417,6 +414,14 @@ const ExcalidrawWrapper = () => {
     return isCollaborationLink(window.location.href);
   });
   const collabError = useAtomValue(collabErrorIndicatorAtom);
+  const authUser = useAtomValue(authUserAtom);
+
+  // signed in: your account name is shown next to your cursor
+  useEffect(() => {
+    if (authUser && collabAPI) {
+      collabAPI.setUsername(authUser.name);
+    }
+  }, [authUser, collabAPI]);
   const userToFollow = useAtomValue(userToFollowAtom);
 
   const viewportStatusFrame = useMemo(
@@ -568,42 +573,24 @@ const ExcalidrawWrapper = () => {
       return;
     }
 
-    // #collection=<id>,<key> links add the collection to "My collections"
-    const openCollectionFromLink = () => {
-      if (isCollabDisabled || !importCollectionFromLink()) {
-        return false;
-      }
-      window.history.replaceState(
-        {},
-        APP_NAME,
+    // #collection=<id> / #file=<id> links from people sharing with you
+    const openShareLink = () =>
+      !isCollabDisabled &&
+      openShareLinkFromUrl(
+        excalidrawAPI,
         collabAPI?.getActiveRoomLink() || window.location.origin,
       );
-      ensureUsername(collabAPI);
-      excalidrawAPI.toggleSidebar({
-        name: DEFAULT_SIDEBAR.name,
-        tab: COLLECTIONS_SIDEBAR_TAB,
-        force: true,
-      });
-      return true;
-    };
 
-    const isCollectionLink = openCollectionFromLink();
     initializeScene({ collabAPI, excalidrawAPI }).then(async (data) => {
       loadImages(data, /* isInitialLoad */ true);
       initialStatePromiseRef.current.promise.resolve(data.scene);
-      if (isCollectionLink) {
-        // initial scene may have restored a different sidebar state
-        excalidrawAPI.toggleSidebar({
-          name: DEFAULT_SIDEBAR.name,
-          tab: COLLECTIONS_SIDEBAR_TAB,
-          force: true,
-        });
-      }
+      // after the initial scene, which may restore a different sidebar state
+      openShareLink();
     });
 
     const onHashChange = async (event: HashChangeEvent) => {
       event.preventDefault();
-      if (openCollectionFromLink()) {
+      if (openShareLink()) {
         return;
       }
       const libraryUrlTokens = parseLibraryTokensFromUrl();
@@ -1127,6 +1114,7 @@ const ExcalidrawWrapper = () => {
           <Collab excalidrawAPI={excalidrawAPI} />
         )}
 
+        <AuthDialog />
         <ShareDialog
           collabAPI={collabAPI}
           onExportToBackend={async () => {

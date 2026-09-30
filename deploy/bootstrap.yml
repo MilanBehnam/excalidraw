@@ -276,6 +276,7 @@ Resources:
                   - dynamodb:DescribeContinuousBackups
                   - dynamodb:UpdateContinuousBackups
                   - dynamodb:DescribeTimeToLive
+                  - dynamodb:UpdateTimeToLive
                   - dynamodb:TagResource
                   - dynamodb:UntagResource
                   - dynamodb:ListTagsOfResource
@@ -289,6 +290,8 @@ Resources:
                   - s3:GetBucketPublicAccessBlock
                   - s3:PutBucketTagging
                   - s3:GetBucketTagging
+                  - s3:PutLifecycleConfiguration
+                  - s3:GetLifecycleConfiguration
                 Resource: !Sub arn:aws:s3:::excalidraw-${AWS::AccountId}
               # distribution ids are generated; scoped to this account's
               # distributions and to the Project tag where CloudFront supports it
@@ -311,6 +314,32 @@ Resources:
                   - cloudfront:ListTagsForResource
                   - cloudfront:UntagResource
                 Resource: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/*
+                Condition:
+                  StringEquals:
+                    aws:ResourceTag/Project: excalidraw
+              # user pool ids are generated: matched by the Project tag
+              - Sid: UserPoolCreateOnlyWhenTagged
+                Effect: Allow
+                Action: [cognito-idp:CreateUserPool, cognito-idp:TagResource]
+                Resource: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*
+                Condition:
+                  StringEquals:
+                    aws:RequestTag/Project: excalidraw
+              - Sid: UserPoolChangeTaggedOnly
+                Effect: Allow
+                Action:
+                  - cognito-idp:DescribeUserPool
+                  - cognito-idp:UpdateUserPool
+                  - cognito-idp:DeleteUserPool
+                  - cognito-idp:GetUserPoolMfaConfig
+                  - cognito-idp:SetUserPoolMfaConfig
+                  - cognito-idp:ListTagsForResource
+                  - cognito-idp:UntagResource
+                  - cognito-idp:CreateUserPoolClient
+                  - cognito-idp:DescribeUserPoolClient
+                  - cognito-idp:UpdateUserPoolClient
+                  - cognito-idp:DeleteUserPoolClient
+                Resource: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*
                 Condition:
                   StringEquals:
                     aws:ResourceTag/Project: excalidraw

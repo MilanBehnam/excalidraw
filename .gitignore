@@ -30,3 +30,4 @@ meta*.json
 deploy/.env
 # the backend uses npm (Dockerfile runs npm ci)
 !backend/package-lock.json
+deploy/.deployed

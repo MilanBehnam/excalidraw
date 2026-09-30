@@ -6,7 +6,8 @@
     gap: 0.75rem;
     overflow-y: auto;
 
-    button {
+    // plain text buttons (not the FilledButton ones)
+    button:not(.ExcButton) {
       font: inherit;
       color: inherit;
       background: none;
@@ -23,6 +24,14 @@
     h3 {
       margin: 0;
     }
+
+    h4 {
+      margin: 0.5rem 0 0;
+      font-size: 0.8125rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--color-gray-60);
+    }
   }
 
   .collections__header {
@@ -32,17 +41,76 @@
     gap: 0.5rem;
   }
 
+  .collections__account {
+    align-self: flex-start;
+    font-size: 0.8125rem !important;
+    color: var(--color-gray-60) !important;
+  }
+
   .collections__active {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
+    flex-direction: column;
+    gap: 0.25rem;
     padding: 0.5rem;
     border-radius: var(--border-radius-lg);
     background: var(--color-primary-light);
 
+    &--preview {
+      background: var(--color-warning, #fff3bf);
+      color: #1e1e1e;
+    }
+  }
+
+  .collections__active-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+
     button {
       color: var(--color-primary);
       font-weight: 600;
+    }
+  }
+
+  .collections__versions {
+    list-style: none;
+    margin: 0.25rem 0 0;
+    padding: 0;
+    max-height: 14rem;
+    overflow-y: auto;
+
+    button {
+      width: 100%;
+      text-align: left;
+      font-size: 0.8125rem !important;
+    }
+  }
+
+  .collections__owner {
+    font-weight: normal;
+    color: var(--color-gray-60);
+  }
+
+  .collections__members {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem;
+    margin: 0.25rem 0;
+    font-size: 0.8125rem;
+    color: var(--color-gray-60);
+  }
+
+  .collections__member {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 0 0 0.4rem;
+    border-radius: 1rem;
+    background: var(--button-gray-1, rgba(0, 0, 0, 0.06));
+    color: var(--text-primary-color);
+
+    button {
+      padding: 0 0.4rem !important;
     }
   }
 

@@ -1,5 +1,6 @@
 // Client for our own collab backend (backend/server.ts): collab room scenes
-// and images, stored end-to-end encrypted.
+// and images. They're encrypted with the room key (from the quick room's link,
+// or handed out by the server for collection files, see backend/store.ts).
 
 import { reconcileElements } from "@excalidraw/excalidraw";
 import { MIME_TYPES, toBrandedType } from "@excalidraw/common";
@@ -25,7 +26,7 @@ import type {
   DataURL,
 } from "@excalidraw/excalidraw/types";
 
-import { STORAGE_KEYS } from "../app_constants";
+import { apiUrl, getIdToken } from "../auth/auth";
 
 import { getSyncableElements } from ".";
 
@@ -36,59 +37,27 @@ import type { Socket } from "socket.io-client";
 // http
 // -----------------------------------------------------------------------------
 
-// the socket server and the HTTP API are the same backend
-const BACKEND_URL = new URL(
-  import.meta.env.VITE_APP_WS_SERVER_URL,
-  window.location.href,
-);
-
-const getPasscode = () => {
-  try {
-    return localStorage.getItem(STORAGE_KEYS.LOCAL_STORAGE_BACKEND_PASSCODE);
-  } catch {
-    return null;
-  }
-};
-
-/**
- * fetch against the backend. The server asks for a passcode (401) only when
- * creating new collections/rooms, in which case we prompt once and remember it.
- */
+/** fetch against the backend, as the signed-in user (if any) */
 export const backendFetch = async (
   path: string,
   init: RequestInit = {},
 ): Promise<Response> => {
-  const send = (passcode: string | null) =>
-    fetch(new URL(`api/${path}`, BACKEND_URL), {
-      ...init,
-      headers: {
-        ...init.headers,
-        ...(passcode ? { "x-passcode": passcode } : {}),
-      },
-    });
-
-  const res = await send(getPasscode());
-  if (res.status !== 401) {
-    return res;
-  }
-  const input = window
-    .prompt("This server needs a passcode to create new collections and rooms:")
-    ?.trim();
-  if (!input) {
-    throw new Error("A server passcode is required for this");
-  }
-  const retry = await send(input);
-  if (retry.status === 401) {
-    throw new Error("Wrong server passcode");
-  }
-  // remember it only once the server accepted it
-  try {
-    localStorage.setItem(STORAGE_KEYS.LOCAL_STORAGE_BACKEND_PASSCODE, input);
-  } catch {}
-  return retry;
+  const token = await getIdToken();
+  return fetch(apiUrl(path), {
+    ...init,
+    headers: {
+      ...init.headers,
+      // not `Authorization`: CloudFront drops that on GET requests
+      ...(token ? { "x-auth-token": token } : {}),
+    },
+  });
 };
 
 export const MAX_BACKEND_BYTES = 5 * 1024 * 1024;
+
+/** `status` 401/403 = no access (anymore) to the room */
+const httpError = (message: string, status: number) =>
+  Object.assign(new Error(`${message} (${status})`), { status });
 
 // scenes
 // -----------------------------------------------------------------------------
@@ -173,7 +142,7 @@ export const saveSceneElements = async (
         ),
       );
     } else if (res.status !== 404) {
-      throw new Error(`Loading scene failed (${res.status})`);
+      throw httpError("Loading scene failed", res.status);
     }
 
     const put = await backendFetch(`scenes/${roomId}`, {
@@ -189,7 +158,7 @@ export const saveSceneElements = async (
       throw new Error(`Scene is longer than ${MAX_BACKEND_BYTES} bytes`);
     }
     if (put.status !== 412) {
-      throw new Error(`Saving scene failed (${put.status})`);
+      throw httpError("Saving scene failed", put.status);
     }
   }
   throw new Error("Saving scene failed: too many concurrent changes");
@@ -246,6 +215,22 @@ export const loadScene = async (
   return elements;
 };
 
+/** a snapshot from a collection file's version history */
+export const loadVersion = async (
+  fileId: string,
+  versionId: string,
+  key: string,
+) => {
+  const res = await backendFetch(`files/${fileId}/versions/${versionId}`);
+  if (!res.ok) {
+    throw new Error(`Loading version failed (${res.status})`);
+  }
+  return restoreElements(
+    await decryptElements(await res.arrayBuffer(), key),
+    null,
+  );
+};
+
 // images
 // -----------------------------------------------------------------------------
 
@@ -259,7 +244,7 @@ export const saveFilesToBackend = async (
   await Promise.all(
     files.map(async ({ id, buffer }) => {
       try {
-        const res = await backendFetch(`files/${roomId}/${id}`, {
+        const res = await backendFetch(`images/${roomId}/${id}`, {
           method: "PUT",
           body: buffer as Uint8Array<ArrayBuffer>,
         });
@@ -284,7 +269,7 @@ export const loadFilesFromBackend = async (
   await Promise.all(
     [...new Set(filesIds)].map(async (id) => {
       try {
-        const res = await backendFetch(`files/${roomId}/${id}`);
+        const res = await backendFetch(`images/${roomId}/${id}`);
         if (!res.ok) {
           erroredFiles.set(id, true);
           return;

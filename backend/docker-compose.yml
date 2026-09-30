@@ -7,8 +7,13 @@ services:
       - "3002:3002"
     environment:
       CREATE_RESOURCES: "true"
-      CORS_ORIGIN: http://localhost:3001
-      PASSCODE: dev
+      # any local origin (e.g. localhost and 127.0.0.1 to test two users)
+      CORS_ORIGIN: "*"
+      # made-up logins for local testing (see auth.ts); real Cognito logins
+      # work too when these are set
+      DEV_FAKE_AUTH: "true"
+      COGNITO_USER_POOL_ID: ${COGNITO_USER_POOL_ID:-}
+      COGNITO_CLIENT_ID: ${COGNITO_CLIENT_ID:-}
       AWS_REGION: us-east-1
       AWS_ACCESS_KEY_ID: local
       AWS_SECRET_ACCESS_KEY: localsecret

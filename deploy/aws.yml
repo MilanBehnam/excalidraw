@@ -7,17 +7,11 @@
 #
 #   aws cloudformation deploy --template-file deploy/aws.yml \
 #     --stack-name excalidraw --capabilities CAPABILITY_NAMED_IAM \
-#     --role-arn arn:aws:iam::<account id>:role/excalidraw-cloudformation \
-#     --parameter-overrides Passcode=<pick one>
+#     --role-arn arn:aws:iam::<account id>:role/excalidraw-cloudformation
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Excalidraw with live collaboration and shared collections
+Description: Excalidraw with accounts, live collaboration, shared collections and version history
 
 Parameters:
-  Passcode:
-    Type: String
-    NoEcho: true
-    MinLength: 8
-    Description: Needed to create collections and standalone rooms
   RepoUrl:
     Type: String
     Default: https://github.com/MilanBehnam/excalidraw.git
@@ -54,6 +48,10 @@ Resources:
         - { AttributeName: sk, KeyType: RANGE }
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
+      # old versions are removed after 90 days (see backend/store.ts)
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
       Tags:
         - { Key: Project, Value: excalidraw }
 
@@ -68,8 +66,60 @@ Resources:
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-old-versions
+            Status: Enabled
+            Prefix: versions/
+            ExpirationInDays: 90
       Tags:
         - { Key: Project, Value: excalidraw }
+
+  # accounts: sign-up with email + verification code, login, password reset.
+  # The app talks to Cognito directly; the backend only checks its ID tokens.
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      UserPoolName: excalidraw
+      UserPoolTier: LITE
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      Schema:
+        - Name: name
+          AttributeDataType: String
+          Required: true
+          Mutable: true
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireUppercase: false
+          RequireSymbols: false
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - { Name: verified_email, Priority: 1 }
+      VerificationMessageTemplate:
+        DefaultEmailOption: CONFIRM_WITH_CODE
+        EmailSubject: Your Excalidraw code
+        EmailMessage: "Your Excalidraw code is {####}"
+      UserPoolTags:
+        Project: excalidraw
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientName: excalidraw-web
+      GenerateSecret: false
+      ExplicitAuthFlows: [ALLOW_USER_PASSWORD_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
+      RefreshTokenValidity: 30
+      TokenValidityUnits:
+        RefreshToken: days
 
   Role:
     Type: AWS::IAM::Role
@@ -96,6 +146,7 @@ Resources:
                   - dynamodb:UpdateItem
                   - dynamodb:DeleteItem
                   - dynamodb:Query
+                  - dynamodb:BatchGetItem
                 Resource: !GetAtt Table.Arn
               - Effect: Allow
                 Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
@@ -256,7 +307,8 @@ Resources:
             AWS_REGION=${AWS::Region}
             TABLE_NAME=${Table}
             BUCKET_NAME=${Bucket}
-            PASSCODE=${Passcode}
+            COGNITO_USER_POOL_ID=${UserPool}
+            COGNITO_CLIENT_ID=${UserPoolClient}
             EOF
             chmod 600 deploy/.env
             # before the first build, so a failed build is retried by the next push
@@ -308,6 +360,10 @@ Resources:
         - { Key: Project, Value: excalidraw }
 
 Outputs:
+  UserPoolId:
+    Value: !Ref UserPool
+  UserPoolClientId:
+    Value: !Ref UserPoolClient
   CdnUrl:
     Value: !Sub "https://${Cdn.DomainName}"
   Url:

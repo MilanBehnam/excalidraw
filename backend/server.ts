@@ -1,157 +1,66 @@
 // Collaboration backend for excalidraw-app:
+// - accounts (Cognito ID tokens, see auth.ts)
+// - collections, files, sharing by email and version history (store.ts)
 // - socket.io relay for live rooms (protocol ported from
-//   https://github.com/excalidraw/excalidraw-room, MIT)
-// - storage for collections (DynamoDB) and scenes/images (S3)
-//
-// Everything stored is end-to-end encrypted by the client. The server only
-// sees ids and opaque blobs; the keys live in the URL hash and never reach it.
+//   https://github.com/excalidraw/excalidraw-room, MIT), with access checks
 
-import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import http from "node:http";
 
 import {
   CreateTableCommand,
-  DynamoDBClient,
   ResourceInUseException,
 } from "@aws-sdk/client-dynamodb";
-import {
-  CreateBucketCommand,
-  DeleteObjectCommand,
-  GetObjectCommand,
-  ListObjectsV2Command,
-  NoSuchKey,
-  PutObjectCommand,
-  S3Client,
-} from "@aws-sdk/client-s3";
-import {
-  DeleteCommand,
-  DynamoDBDocumentClient,
-  GetCommand,
-  PutCommand,
-  QueryCommand,
-  UpdateCommand,
-} from "@aws-sdk/lib-dynamodb";
+import { CreateBucketCommand } from "@aws-sdk/client-s3";
 import { Server as SocketIO } from "socket.io";
 
+import { authConfig, verifyToken } from "./auth.ts";
+import {
+  BUCKET,
+  HttpError,
+  TABLE,
+  createCollection,
+  createFile,
+  createVersion,
+  db,
+  deleteCollection,
+  deleteFile,
+  deleteUser,
+  ensureUser,
+  getCollection,
+  getFile,
+  getObject,
+  getScene,
+  getVersion,
+  listAccess,
+  listVersions,
+  putObject,
+  renameCollection,
+  renameFile,
+  requireRoomAccess,
+  roomAccess,
+  roomsOf,
+  roomsOfUser,
+  s3,
+  saveScene,
+  sceneExists,
+  share,
+  unshare,
+} from "./store.ts";
+
+import type { User } from "./auth.ts";
+import type { Kind } from "./store.ts";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 const PORT = Number(process.env.PORT || 3002);
-const TABLE = process.env.TABLE_NAME || "excalidraw";
-const BUCKET = process.env.BUCKET_NAME || "excalidraw";
-/** required to create collections and standalone rooms. Empty = disabled */
-const PASSCODE = process.env.PASSCODE || "";
 /** only needed when the app is served from another origin (local dev) */
 const CORS_ORIGIN = process.env.CORS_ORIGIN || "";
 const MAX_BYTES = 5 * 1024 * 1024;
-const MAX_NAME_LENGTH = 2000;
+const MAX_NAME_LENGTH = 200;
 const ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+/** wait for the last client's final save before snapshotting on leave */
+const LEAVE_VERSION_DELAY_MS = 10000;
 
-const db = DynamoDBDocumentClient.from(new DynamoDBClient({}));
-// path-style addressing for S3-compatible servers (S3Mock in local dev)
-const s3 = new S3Client({ forcePathStyle: !!process.env.AWS_ENDPOINT_URL_S3 });
-
-class HttpError extends Error {
-  status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
-}
-
-// storage
-// -----------------------------------------------------------------------------
-// Table layout (pk, sk):
-//   col#<id>, meta          { name }                collection
-//   col#<id>, file#<fid>    { name, createdAt }     file in collection
-//   scene#<roomId>, meta    { rev, obj? }           pointer to scenes/<roomId>/<uuid>
-// Images: files/<roomId>/<fileId>
-
-const newId = () => randomBytes(10).toString("hex");
-
-const getItem = async (pk: string, sk = "meta") =>
-  (await db.send(new GetCommand({ TableName: TABLE, Key: { pk, sk } }))).Item;
-
-const getObject = async (key: string) => {
-  try {
-    const obj = await s3.send(
-      new GetObjectCommand({ Bucket: BUCKET, Key: key }),
-    );
-    return Buffer.from(await obj.Body!.transformToByteArray());
-  } catch (error) {
-    if (error instanceof NoSuchKey) {
-      return null;
-    }
-    throw error;
-  }
-};
-
-const putObject = (key: string, body: Buffer) =>
-  s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: body }));
-
-const deleteObject = (key: string) =>
-  s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }));
-
-const deleteRoom = async (roomId: string) => {
-  const scene = await getItem(`scene#${roomId}`);
-  if (scene?.obj) {
-    await deleteObject(scene.obj);
-  }
-  let token: string | undefined;
-  do {
-    const list = await s3.send(
-      new ListObjectsV2Command({
-        Bucket: BUCKET,
-        Prefix: `files/${roomId}/`,
-        ContinuationToken: token,
-      }),
-    );
-    await Promise.all((list.Contents || []).map((o) => deleteObject(o.Key!)));
-    token = list.NextContinuationToken;
-  } while (token);
-  await db.send(
-    new DeleteCommand({
-      TableName: TABLE,
-      Key: { pk: `scene#${roomId}`, sk: "meta" },
-    }),
-  );
-};
-
-/** saves only if the stored revision still matches `expectedRev` */
-const saveScene = async (roomId: string, expectedRev: number, body: Buffer) => {
-  const obj = `scenes/${roomId}/${randomUUID()}`;
-  await putObject(obj, body);
-  try {
-    const { Attributes: prev } = await db.send(
-      new UpdateCommand({
-        TableName: TABLE,
-        Key: { pk: `scene#${roomId}`, sk: "meta" },
-        UpdateExpression: "SET rev = :next, obj = :obj",
-        ConditionExpression:
-          expectedRev === 0
-            ? "attribute_not_exists(pk) OR rev = :expected"
-            : "rev = :expected",
-        ExpressionAttributeValues: {
-          ":next": expectedRev + 1,
-          ":obj": obj,
-          ":expected": expectedRev,
-        },
-        ReturnValues: "UPDATED_OLD",
-      }),
-    );
-    if (prev?.obj) {
-      await deleteObject(prev.obj);
-    }
-    return expectedRev + 1;
-  } catch (error: any) {
-    await deleteObject(obj);
-    if (error.name === "ConditionalCheckFailedException") {
-      throw new HttpError(412, "scene was changed, reload and retry");
-    }
-    throw error;
-  }
-};
-
-// http
+// http helpers
 // -----------------------------------------------------------------------------
 
 const send = (
@@ -183,29 +92,39 @@ const readBody = async (req: IncomingMessage) => {
   return Buffer.concat(chunks);
 };
 
-/** reads `{ name }`, where name is the client-encrypted name */
-const readName = async (req: IncomingMessage): Promise<string> => {
-  let name: unknown;
+const readJson = async (req: IncomingMessage): Promise<Record<string, any>> => {
   try {
-    name = JSON.parse((await readBody(req)).toString()).name;
-  } catch {
-    throw new HttpError(400, "invalid JSON");
-  }
-  if (typeof name !== "string" || !name || name.length > MAX_NAME_LENGTH) {
-    throw new HttpError(400, "invalid name");
-  }
-  return name;
+    const json = JSON.parse((await readBody(req)).toString());
+    if (json && typeof json === "object") {
+      return json;
+    }
+  } catch {}
+  throw new HttpError(400, "invalid JSON");
 };
 
-const checkPasscode = (req: IncomingMessage) => {
-  if (!PASSCODE) {
-    return;
+const readName = async (req: IncomingMessage) => {
+  const name = (await readJson(req)).name;
+  if (
+    typeof name !== "string" ||
+    !name.trim() ||
+    name.length > MAX_NAME_LENGTH
+  ) {
+    throw new HttpError(400, "invalid name");
   }
-  const given = Buffer.from(String(req.headers["x-passcode"] || ""));
-  const expected = Buffer.from(PASSCODE);
-  if (given.length !== expected.length || !timingSafeEqual(given, expected)) {
-    throw new HttpError(401, "passcode required");
+  return name.trim();
+};
+
+const readShare = async (req: IncomingMessage) => {
+  const { kind, id, ...rest } = await readJson(req);
+  if ((kind !== "col" && kind !== "file") || !ID_RE.test(id)) {
+    throw new HttpError(400, "invalid share");
   }
+  return { kind: kind as Kind, id: id as string, ...rest } as {
+    kind: Kind;
+    id: string;
+    email?: unknown;
+    target?: unknown;
+  };
 };
 
 const parseRev = (header: string | undefined) => {
@@ -216,202 +135,23 @@ const parseRev = (header: string | undefined) => {
   return rev;
 };
 
-const handleScenes = async (
-  req: IncomingMessage,
-  res: ServerResponse,
-  roomId: string,
-) => {
-  if (req.method === "GET") {
-    const scene = await getItem(`scene#${roomId}`);
-    const body = scene?.obj && (await getObject(scene.obj));
-    if (!body) {
-      return send(res, 404, { error: "not found" });
-    }
-    return send(res, 200, body, {
-      etag: `"${scene.rev}"`,
-      "cache-control": "no-store",
-    });
+/**
+ * The app sends `x-auth-token` because CloudFront drops `Authorization` on
+ * GET requests unless it's part of the cache key; tests use `Authorization`.
+ */
+const bearer = (req: IncomingMessage) =>
+  (req.headers["x-auth-token"] as string | undefined) ||
+  req.headers.authorization?.replace(/^Bearer /, "");
+
+const requireUser = (user: User | null) => {
+  if (!user) {
+    throw new HttpError(401, "sign in required");
   }
-  if (req.method === "PUT") {
-    const expectedRev = parseRev(req.headers["if-match"]);
-    // brand new rooms (outside of collections) need the passcode
-    if (expectedRev === 0 && !(await getItem(`scene#${roomId}`))) {
-      checkPasscode(req);
-    }
-    const rev = await saveScene(roomId, expectedRev, await readBody(req));
-    return send(res, 200, { rev }, { etag: `"${rev}"` });
-  }
-  throw new HttpError(405, "method not allowed");
+  return user;
 };
 
-const handleFiles = async (
-  req: IncomingMessage,
-  res: ServerResponse,
-  roomId: string,
-  fileId: string,
-) => {
-  const key = `files/${roomId}/${fileId}`;
-  if (req.method === "GET") {
-    const body = await getObject(key);
-    return body
-      ? send(res, 200, body, {
-          // file ids are content hashes, so they never change
-          "cache-control": "public, max-age=31536000, immutable",
-        })
-      : send(res, 404, { error: "not found" });
-  }
-  if (req.method === "PUT") {
-    if (!(await getItem(`scene#${roomId}`))) {
-      checkPasscode(req);
-    }
-    await putObject(key, await readBody(req));
-    return send(res, 200, {});
-  }
-  throw new HttpError(405, "method not allowed");
-};
-
-const handleCollections = async (
-  req: IncomingMessage,
-  res: ServerResponse,
-  id?: string,
-  sub?: string,
-  fileId?: string,
-) => {
-  const pk = `col#${id}`;
-
-  if (!id) {
-    if (req.method !== "POST") {
-      throw new HttpError(405, "method not allowed");
-    }
-    checkPasscode(req);
-    const name = await readName(req);
-    const newCollectionId = newId();
-    await db.send(
-      new PutCommand({
-        TableName: TABLE,
-        Item: { pk: `col#${newCollectionId}`, sk: "meta", name },
-      }),
-    );
-    return send(res, 201, { id: newCollectionId });
-  }
-
-  if (!sub) {
-    if (req.method === "GET") {
-      // ponytail: single Query page (1 MB), paginate if a collection ever
-      // holds thousands of files
-      const { Items = [] } = await db.send(
-        new QueryCommand({
-          TableName: TABLE,
-          KeyConditionExpression: "pk = :pk",
-          ExpressionAttributeValues: { ":pk": pk },
-        }),
-      );
-      const meta = Items.find((item) => item.sk === "meta");
-      if (!meta) {
-        return send(res, 404, { error: "not found" });
-      }
-      const files = Items.filter((item) => item.sk.startsWith("file#"))
-        .map((item) => ({
-          id: item.sk.slice("file#".length),
-          name: item.name,
-          createdAt: item.createdAt,
-        }))
-        .sort((a, b) => a.createdAt - b.createdAt);
-      return send(res, 200, { name: meta.name, files });
-    }
-    if (req.method === "PATCH") {
-      await renameItem(pk, "meta", await readName(req));
-      return send(res, 200, {});
-    }
-    if (req.method === "DELETE") {
-      const { Items = [] } = await db.send(
-        new QueryCommand({
-          TableName: TABLE,
-          KeyConditionExpression: "pk = :pk",
-          ExpressionAttributeValues: { ":pk": pk },
-        }),
-      );
-      for (const item of Items) {
-        if (item.sk.startsWith("file#")) {
-          await deleteRoom(item.sk.slice("file#".length));
-        }
-        await db.send(
-          new DeleteCommand({ TableName: TABLE, Key: { pk, sk: item.sk } }),
-        );
-      }
-      return send(res, 204);
-    }
-    throw new HttpError(405, "method not allowed");
-  }
-
-  if (sub !== "files") {
-    throw new HttpError(404, "not found");
-  }
-
-  if (!fileId) {
-    if (req.method !== "POST") {
-      throw new HttpError(405, "method not allowed");
-    }
-    const name = await readName(req);
-    if (!(await getItem(pk))) {
-      throw new HttpError(404, "collection not found");
-    }
-    const newFileId = newId();
-    await db.send(
-      new PutCommand({
-        TableName: TABLE,
-        Item: { pk, sk: `file#${newFileId}`, name, createdAt: Date.now() },
-      }),
-    );
-    // empty scene, so friends can save into it without the passcode
-    await db.send(
-      new PutCommand({
-        TableName: TABLE,
-        Item: { pk: `scene#${newFileId}`, sk: "meta", rev: 0, col: id },
-      }),
-    );
-    return send(res, 201, { id: newFileId });
-  }
-
-  if (req.method === "PATCH") {
-    await renameItem(pk, `file#${fileId}`, await readName(req));
-    return send(res, 200, {});
-  }
-  if (req.method === "DELETE") {
-    if (!(await getItem(pk, `file#${fileId}`))) {
-      throw new HttpError(404, "file not found");
-    }
-    await deleteRoom(fileId);
-    await db.send(
-      new DeleteCommand({
-        TableName: TABLE,
-        Key: { pk, sk: `file#${fileId}` },
-      }),
-    );
-    return send(res, 204);
-  }
-  throw new HttpError(405, "method not allowed");
-};
-
-const renameItem = async (pk: string, sk: string, name: string) => {
-  try {
-    await db.send(
-      new UpdateCommand({
-        TableName: TABLE,
-        Key: { pk, sk },
-        UpdateExpression: "SET #name = :name",
-        ConditionExpression: "attribute_exists(pk)",
-        ExpressionAttributeNames: { "#name": "name" },
-        ExpressionAttributeValues: { ":name": name },
-      }),
-    );
-  } catch (error: any) {
-    if (error.name === "ConditionalCheckFailedException") {
-      throw new HttpError(404, "not found");
-    }
-    throw error;
-  }
-};
+// routes
+// -----------------------------------------------------------------------------
 
 const handle = async (req: IncomingMessage, res: ServerResponse) => {
   if (CORS_ORIGIN) {
@@ -422,7 +162,7 @@ const handle = async (req: IncomingMessage, res: ServerResponse) => {
     );
     res.setHeader(
       "access-control-allow-headers",
-      "content-type, if-match, x-passcode",
+      "content-type, if-match, authorization, x-auth-token",
     );
     res.setHeader("access-control-expose-headers", "etag");
     if (req.method === "OPTIONS") {
@@ -433,6 +173,8 @@ const handle = async (req: IncomingMessage, res: ServerResponse) => {
   const [api, kind, ...params] = new URL(req.url!, "http://localhost").pathname
     .split("/")
     .filter(Boolean);
+  const [a, b, c] = params;
+  const method = req.method;
 
   if (!api) {
     return send(res, 200, { ok: true });
@@ -440,15 +182,136 @@ const handle = async (req: IncomingMessage, res: ServerResponse) => {
   if (api !== "api" || params.some((param) => !ID_RE.test(param))) {
     throw new HttpError(404, "not found");
   }
+  if (kind === "config" && method === "GET") {
+    return send(res, 200, authConfig);
+  }
+
+  const user = await verifyToken(bearer(req));
+  if (user) {
+    await ensureUser(user);
+  }
+
+  // quick rooms and collection files
   if (kind === "scenes" && params.length === 1) {
-    return handleScenes(req, res, params[0]);
+    if (method === "GET") {
+      await requireRoomAccess(user, a);
+      const scene = await getScene(a);
+      return scene
+        ? send(res, 200, scene.body, {
+            etag: `"${scene.rev}"`,
+            "cache-control": "no-store",
+          })
+        : send(res, 404, { error: "not found" });
+    }
+    if (method === "PUT") {
+      const expectedRev = parseRev(req.headers["if-match"]);
+      // starting a new quick room needs an account (it uses our storage)
+      if (!(await sceneExists(a))) {
+        requireUser(user);
+      }
+      await requireRoomAccess(user, a);
+      const rev = await saveScene(a, expectedRev, await readBody(req), user);
+      return send(res, 200, { rev }, { etag: `"${rev}"` });
+    }
   }
-  if (kind === "files" && params.length === 2) {
-    return handleFiles(req, res, params[0], params[1]);
+
+  if (kind === "images" && params.length === 2) {
+    await requireRoomAccess(user, a);
+    const key = `images/${a}/${b}`;
+    if (method === "GET") {
+      const body = await getObject(key);
+      return body
+        ? send(res, 200, body, {
+            // image ids are content hashes, so they never change
+            "cache-control": "private, max-age=31536000, immutable",
+          })
+        : send(res, 404, { error: "not found" });
+    }
+    if (method === "PUT") {
+      if (!(await sceneExists(a))) {
+        requireUser(user);
+      }
+      await putObject(key, await readBody(req));
+      return send(res, 200, {});
+    }
   }
-  if (kind === "collections" && params.length <= 3) {
-    return handleCollections(req, res, ...params);
+
+  // everything below needs an account
+  const me = requireUser(user);
+
+  if (kind === "me" && params.length === 0) {
+    if (method === "GET") {
+      return send(res, 200, await listAccess(me));
+    }
+    if (method === "DELETE") {
+      const rooms = await roomsOfUser(me);
+      await deleteUser(me);
+      await revalidateRooms(rooms);
+      return send(res, 204);
+    }
   }
+
+  if (kind === "collections") {
+    if (params.length === 0 && method === "POST") {
+      return send(res, 201, await createCollection(me, await readName(req)));
+    }
+    if (params.length === 1) {
+      if (method === "GET") {
+        return send(res, 200, await getCollection(me, a));
+      }
+      if (method === "PATCH") {
+        await renameCollection(me, a, await readName(req));
+        return send(res, 200, {});
+      }
+      if (method === "DELETE") {
+        const rooms = await roomsOf("col", a);
+        await deleteCollection(me, a);
+        await revalidateRooms(rooms);
+        return send(res, 204);
+      }
+    }
+    if (b === "files") {
+      if (params.length === 2 && method === "POST") {
+        return send(res, 201, await createFile(me, a, await readName(req)));
+      }
+      if (params.length === 3 && method === "PATCH") {
+        await renameFile(me, a, c, await readName(req));
+        return send(res, 200, {});
+      }
+      if (params.length === 3 && method === "DELETE") {
+        await deleteFile(me, a, c);
+        await revalidateRooms([c]);
+        return send(res, 204);
+      }
+    }
+  }
+
+  if (kind === "files" && method === "GET") {
+    if (params.length === 1) {
+      return send(res, 200, await getFile(me, a));
+    }
+    if (params.length === 2 && b === "versions") {
+      return send(res, 200, await listVersions(me, a));
+    }
+    if (params.length === 3 && b === "versions") {
+      return send(res, 200, await getVersion(me, a, c), {
+        "cache-control": "private, max-age=31536000, immutable",
+      });
+    }
+  }
+
+  if (kind === "shares" && params.length === 0) {
+    const body = await readShare(req);
+    if (method === "POST" && typeof body.email === "string") {
+      return send(res, 200, await share(me, body.kind, body.id, body.email));
+    }
+    if (method === "DELETE" && typeof body.target === "string") {
+      await unshare(me, body.kind, body.id, body.target);
+      await revalidateRooms(await roomsOf(body.kind, body.id));
+      return send(res, 204);
+    }
+  }
+
   throw new HttpError(404, "not found");
 };
 
@@ -476,10 +339,33 @@ const io = new SocketIO(server, {
   maxHttpBufferSize: MAX_BYTES,
 });
 
-io.on("connection", (socket) => {
+const isFollowRoom = (roomID: string) => roomID.startsWith("follow@");
+
+/** after access changes: sends out whoever may no longer be in these rooms */
+const revalidateRooms = async (roomIds: string[]) => {
+  for (const roomID of roomIds) {
+    for (const socket of await io.in(roomID).fetchSockets()) {
+      if ((await roomAccess(socket.data.user, roomID)) === "denied") {
+        socket.emit("access-denied");
+        socket.leave(roomID);
+      }
+    }
+  }
+};
+
+io.on("connection", async (socket) => {
+  const user = await verifyToken(socket.handshake.auth?.token);
+  socket.data.user = user;
   io.to(socket.id).emit("init-room");
 
   socket.on("join-room", async (roomID: string) => {
+    if (typeof roomID !== "string" || !ID_RE.test(roomID)) {
+      return;
+    }
+    if ((await roomAccess(user, roomID)) === "denied") {
+      io.to(socket.id).emit("access-denied");
+      return;
+    }
     await socket.join(roomID);
     const sockets = await io.in(roomID).fetchSockets();
     if (sockets.length <= 1) {
@@ -493,23 +379,31 @@ io.on("connection", (socket) => {
     );
   });
 
+  // only relay into rooms the socket actually joined (and was allowed into)
   socket.on(
     "server-broadcast",
     (roomID: string, encryptedData: ArrayBuffer, iv: Uint8Array) => {
-      socket.broadcast.to(roomID).emit("client-broadcast", encryptedData, iv);
+      if (socket.rooms.has(roomID)) {
+        socket.broadcast.to(roomID).emit("client-broadcast", encryptedData, iv);
+      }
     },
   );
 
   socket.on(
     "server-volatile-broadcast",
     (roomID: string, encryptedData: ArrayBuffer, iv: Uint8Array) => {
-      socket.volatile.broadcast
-        .to(roomID)
-        .emit("client-broadcast", encryptedData, iv);
+      if (socket.rooms.has(roomID)) {
+        socket.volatile.broadcast
+          .to(roomID)
+          .emit("client-broadcast", encryptedData, iv);
+      }
     },
   );
 
   socket.on("user-follow", async (payload: OnUserFollowedPayload) => {
+    if (typeof payload?.userToFollow?.socketId !== "string") {
+      return;
+    }
     const roomID = `follow@${payload.userToFollow.socketId}`;
     if (payload.action === "FOLLOW") {
       await socket.join(roomID);
@@ -525,18 +419,28 @@ io.on("connection", (socket) => {
 
   socket.on("disconnecting", async () => {
     for (const roomID of socket.rooms) {
+      if (roomID === socket.id) {
+        continue;
+      }
       const otherClients = (await io.in(roomID).fetchSockets()).filter(
         (s) => s.id !== socket.id,
       );
-      const isFollowRoom = roomID.startsWith("follow@");
-      if (!isFollowRoom && otherClients.length > 0) {
+      if (!isFollowRoom(roomID) && otherClients.length > 0) {
         socket.broadcast.to(roomID).emit(
           "room-user-change",
           otherClients.map((s) => s.id),
         );
       }
-      if (isFollowRoom && otherClients.length === 0) {
+      if (isFollowRoom(roomID) && otherClients.length === 0) {
         io.to(roomID.replace("follow@", "")).emit("broadcast-unfollow");
+      }
+      // everyone left a file: snapshot it into the version history
+      if (!isFollowRoom(roomID) && otherClients.length === 0) {
+        setTimeout(async () => {
+          if ((await io.in(roomID).fetchSockets()).length === 0) {
+            await createVersion(roomID).catch(console.error);
+          }
+        }, LEAVE_VERSION_DELAY_MS);
       }
     }
   });
@@ -544,6 +448,9 @@ io.on("connection", (socket) => {
 
 // startup
 // -----------------------------------------------------------------------------
+
+// a failed DB call inside a socket handler must not take the server down
+process.on("unhandledRejection", (error) => console.error(error));
 
 /** local dev only: in AWS the CloudFormation stack creates these */
 const createResources = async () => {
@@ -578,7 +485,7 @@ const createResources = async () => {
         });
       return;
     } catch (error) {
-      // dynamodb/minio containers may still be starting
+      // dynamodb/s3 containers may still be starting
       if (attempt >= 20) {
         throw error;
       }

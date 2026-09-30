@@ -31,8 +31,7 @@ aws cloudformation deploy --template-file deploy/bootstrap.yml \
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 aws cloudformation deploy --template-file deploy/aws.yml \
   --stack-name excalidraw --capabilities CAPABILITY_NAMED_IAM \
-  --role-arn arn:aws:iam::$ACCOUNT_ID:role/excalidraw-cloudformation \
-  --parameter-overrides Passcode=<at least 8 characters>
+  --role-arn arn:aws:iam::$ACCOUNT_ID:role/excalidraw-cloudformation
 aws cloudformation describe-stacks --stack-name excalidraw \
   --query "Stacks[0].Outputs" --output table
 ```
@@ -47,7 +46,7 @@ Optional parameters:
 - `InstanceType=t3.medium`: faster builds.
 - `RepoUrl=…` and `Branch=…`: deploy another fork or branch.
 
-The passcode is needed to create collections. Friends who get a share link don't need it.
+Accounts are **AWS Cognito** (user pool `excalidraw`): sign-up with email and a verification code, login, password reset. Cognito sends those emails itself, up to 50 a day, no domain needed. Collections and quick live rooms need an account; joining a quick room via its link doesn't.
 
 ## Updates
 
@@ -69,7 +68,7 @@ The DynamoDB table and S3 bucket are kept (`DeletionPolicy: Retain`) so drawings
 ## Local development
 
 ```bash
-docker compose -f backend/docker-compose.yml up --build   # backend + DynamoDB Local + S3Mock, passcode "dev"
+docker compose -f backend/docker-compose.yml up --build   # backend + DynamoDB Local + S3Mock, made-up dev logins
 yarn start                                                  # app on http://localhost:3001
-docker compose -f backend/docker-compose.yml exec -e PASSCODE=dev backend node --test test.ts
+docker compose -f backend/docker-compose.yml exec backend node --test test.ts
 ```
