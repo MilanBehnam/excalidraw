@@ -1,13 +1,13 @@
 # Self-hosted Excalidraw with live collaboration and shared collections.
-# See deploy/README.md. Usage (on the EC2 instance):
-#   docker compose -f deploy/docker-compose.yml up -d --build
+# See deploy/README.md. On the server, deploy/update.sh runs it.
 services:
+  # images are built by GitHub Actions (.github/workflows/deploy-images.yml)
   app:
-    build: ..
+    image: ${IMAGES:-ghcr.io/milanbehnam/excalidraw}-app:${IMAGE_TAG:-latest}
     restart: unless-stopped
 
   backend:
-    build: ../backend
+    image: ${IMAGES:-ghcr.io/milanbehnam/excalidraw}-backend:${IMAGE_TAG:-latest}
     restart: unless-stopped
     environment:
       # credentials come from the EC2 instance role (deploy/aws.yml)
